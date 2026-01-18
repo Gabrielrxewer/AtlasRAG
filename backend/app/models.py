@@ -7,6 +7,7 @@ from sqlalchemy import (
     String,
     Text,
     JSON,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -38,7 +39,7 @@ class Scan(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     connection_id: Mapped[int] = mapped_column(ForeignKey("connections.id"), nullable=False)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="running")
-    started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    started_at: Mapped[datetime] = mapped_column(DateTime, server_default=text("now()"))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime)
 
     connection: Mapped[Connection] = relationship(back_populates="scans")
