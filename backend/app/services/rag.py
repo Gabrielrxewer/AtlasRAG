@@ -49,6 +49,9 @@ def build_column_document(column: DbColumn) -> dict[str, Any]:
 
 
 def build_api_document(route: ApiRoute) -> dict[str, Any]:
+    header_keys = list((route.headers_template or {}).keys())
+    body_keys = list((route.body_template or {}).keys())
+    query_keys = list((route.query_params_template or {}).keys())
     content = {
         "type": "api_route",
         "id": route.id,
@@ -57,9 +60,10 @@ def build_api_document(route: ApiRoute) -> dict[str, Any]:
         "path": route.path,
         "base_url": route.base_url,
         "description": route.description or "",
-        "headers": route.headers_template or {},
-        "body": route.body_template or {},
-        "query_params": route.query_params_template or {},
+        "auth_type": route.auth_type,
+        "header_keys": header_keys,
+        "body_keys": body_keys,
+        "query_param_keys": query_keys,
         "tags": route.tags or [],
     }
     return {"content": content, "text": _stringify_content(content)}

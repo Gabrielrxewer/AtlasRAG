@@ -23,7 +23,7 @@ docker-compose.yml
 - Python 3.11+
 
 ## Variáveis de ambiente
-Crie um `.env` (ou exporte no shell) com:
+Crie um `.env` em `backend/.env` (ou exporte no shell) com:
 ```
 OPENAI_API_KEY=...
 APP_ENCRYPTION_KEY=<generate_me>
@@ -74,6 +74,11 @@ uvicorn app.main:app --reload
 cd frontend
 npm install
 npm run dev
+```
+
+Crie `frontend/.env` para apontar o backend:
+```
+VITE_API_URL=http://localhost:8000
 ```
 
 ## Fluxo MVP
