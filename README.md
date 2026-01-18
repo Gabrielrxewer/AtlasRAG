@@ -122,6 +122,9 @@ VITE_API_URL=http://localhost:8000
 pytest
 ```
 
+### Índice vetorial (pgvector)
+- A migration cria um índice `ivfflat` para embeddings. Para ganhos reais, rode `ANALYZE embeddings` após inserir volume suficiente (centenas/milhares de vetores).
+
 ### Frontend
 ```
 npm run lint

@@ -153,11 +153,22 @@ def reindex_embeddings(db: Session, scan_id: int | None, include_api_routes: boo
 
 def search_embeddings(db: Session, question: str, top_k: int) -> list[Embedding]:
     vector = embed_texts([question])[0]
-    return db.query(Embedding).order_by(Embedding.embedding.cosine_distance(vector)).limit(top_k).all()
+    distance = Embedding.embedding.cosine_distance(vector)
+    results = (
+        db.query(Embedding, distance.label("distance"))
+        .order_by(distance)
+        .limit(top_k)
+        .all()
+    )
+    # cosine_distance: lower is more similar. Keep rows with distance <= threshold.
+    filtered = [item for item, dist in results if dist is not None and dist <= settings.rag_min_score]
+    return filtered
 
 
 def ask_rag(db: Session, question: str) -> dict[str, Any]:
     matches = search_embeddings(db, question, settings.rag_top_k)
+    if not matches:
+        return {"answer": "Contexto insuficiente para responder com segurança.", "citations": []}
     context = [match.metadata for match in matches]
     instructions = (
         "Você é um assistente de catálogo de dados e APIs. "

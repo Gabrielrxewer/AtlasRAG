@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import text
 from sqlalchemy.engine import create_engine
@@ -124,7 +124,7 @@ def run_scan(db: Session, connection_info: ConnectionInfo, scan_id: int, sample_
         if scan.status != "running":
             scan.status = "running"
         if scan.started_at is None:
-            scan.started_at = datetime.utcnow()
+            scan.started_at = datetime.now(timezone.utc)
         db.commit()
         existing_schemas = db.query(DbSchema).filter(DbSchema.scan_id == scan_id).all()
         for schema in existing_schemas:
@@ -190,12 +190,12 @@ def run_scan(db: Session, connection_info: ConnectionInfo, scan_id: int, sample_
 
         if scan:
             scan.status = "completed"
-            scan.finished_at = datetime.utcnow()
+            scan.finished_at = datetime.now(timezone.utc)
         db.commit()
     except Exception:
         if scan:
             scan.status = "failed"
-            scan.finished_at = datetime.utcnow()
+            scan.finished_at = datetime.now(timezone.utc)
             db.commit()
         raise
 
