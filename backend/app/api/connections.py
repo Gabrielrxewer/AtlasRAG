@@ -78,7 +78,7 @@ def test_connection(connection_id: int, db: Session = Depends(get_db)):
     try:
         test_connection(info)
     except Exception as exc:
-        raise HTTPException(status_code=400, detail="Connection failed") from exc
+        raise HTTPException(status_code=400, detail=_classify_connection_error(exc)) from exc
     return {"status": "ok"}
 
 
@@ -87,7 +87,10 @@ def scan_connection(connection_id: int, background_tasks: BackgroundTasks, db: S
     connection = db.get(Connection, connection_id)
     if not connection:
         raise HTTPException(status_code=404, detail="Connection not found")
-    password = decrypt_secret(connection.password_encrypted)
+    try:
+        password = decrypt_secret(connection.password_encrypted)
+    except EncryptionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     scan = Scan(connection_id=connection.id, status="running")
     db.add(scan)
     db.commit()
@@ -111,6 +114,15 @@ def _run_scan_background(info: ConnectionInfo, scan_id: int) -> None:
         run_scan(session, info, scan_id=scan_id)
     finally:
         session.close()
+
+
+def _classify_connection_error(exc: Exception) -> str:
+    message = str(exc).lower()
+    if "timeout" in message:
+        return "Connection failed: timeout"
+    if "authentication" in message or "password" in message:
+        return "Connection failed: authentication error"
+    return "Connection failed"
 
 
 @router.get("/{connection_id}/scans", response_model=list[ScanOut])

@@ -22,7 +22,7 @@ def upgrade() -> None:
     )
     op.execute(
         "CREATE INDEX IF NOT EXISTS idx_embeddings_embedding_ivfflat "
-        "ON embeddings USING ivfflat (embedding vector_cosine_ops)"
+        "ON embeddings USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)"
     )
 
 

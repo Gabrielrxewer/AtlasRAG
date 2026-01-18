@@ -16,6 +16,8 @@ from pgvector.sqlalchemy import Vector
 
 from app.db import Base
 
+EMBEDDING_DIM = 1536
+
 
 class Connection(Base):
     __tablename__ = "connections"
@@ -180,6 +182,6 @@ class Embedding(Base):
     item_type: Mapped[str] = mapped_column(String(50), nullable=False)
     item_id: Mapped[int] = mapped_column(Integer, nullable=False)
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    embedding: Mapped[list[float]] = mapped_column(Vector(1536))
-    metadata: Mapped[dict | None] = mapped_column(JSONB)
+    embedding: Mapped[list[float]] = mapped_column(Vector(EMBEDDING_DIM))
+    meta: Mapped[dict | None] = mapped_column("metadata", JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))

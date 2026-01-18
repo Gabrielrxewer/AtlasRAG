@@ -41,6 +41,11 @@ CORS_ALLOW_CREDENTIALS=false
 docker-compose up --build
 ```
 
+### Primeira vez rodando
+1) Copie `backend/.env` e gere `APP_ENCRYPTION_KEY`.
+2) Rode migrations: `alembic upgrade head`.
+3) (Opcional) Rode o seed: `python -m app.seed_demo`.
+
 ### Migrações
 ```
 cd backend

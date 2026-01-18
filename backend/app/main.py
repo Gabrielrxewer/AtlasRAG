@@ -1,9 +1,10 @@
-import json
 import logging
 import time
 import uuid
 from collections import OrderedDict
-from fastapi import FastAPI, Request
+from threading import Lock
+from urllib.parse import urlparse
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -15,25 +16,48 @@ app = FastAPI(title="AtlasRAG API", version="0.1.0")
 logger = logging.getLogger("atlasrag")
 
 
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail, "request_id": request_id},
+        headers={"X-Request-ID": request_id},
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error", "request_id": request_id},
+        headers={"X-Request-ID": request_id},
+    )
+
+
 class RateLimiter:
     def __init__(self, max_keys: int, window_seconds: int):
         self.max_keys = max_keys
         self.window_seconds = window_seconds
         self.cache: OrderedDict[str, list[float]] = OrderedDict()
+        self.lock = Lock()
 
     def allow(self, key: str, limit: int) -> bool:
-        now = time.time()
-        timestamps = self.cache.get(key, [])
-        timestamps = [ts for ts in timestamps if now - ts < self.window_seconds]
-        if len(timestamps) >= limit:
+        # Sliding window rate limiter stored in-memory (per-process).
+        with self.lock:
+            now = time.time()
+            timestamps = self.cache.get(key, [])
+            timestamps = [ts for ts in timestamps if now - ts < self.window_seconds]
+            if len(timestamps) >= limit:
+                self.cache[key] = timestamps
+                return False
+            timestamps.append(now)
+            if key in self.cache:
+                self.cache.move_to_end(key)
             self.cache[key] = timestamps
-            return False
-        timestamps.append(now)
-        if key in self.cache:
-            self.cache.move_to_end(key)
-        self.cache[key] = timestamps
-        self._cleanup()
-        return True
+            self._cleanup()
+            return True
 
     def _cleanup(self) -> None:
         while len(self.cache) > self.max_keys:
@@ -45,10 +69,17 @@ rate_limiter = RateLimiter(max_keys=10_000, window_seconds=60)
 
 def _parse_cors_origins(raw: str) -> list[str]:
     origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
+    if settings.environment == "development" and not origins:
+        origins = ["http://localhost:5173", "http://localhost:4173"]
     if settings.environment == "production" and not origins:
         raise RuntimeError("CORS origins must be set in production")
     if settings.cors_allow_credentials and "*" in origins:
         raise RuntimeError("CORS origin '*' is not allowed with credentials enabled")
+    if settings.cors_allow_credentials:
+        for origin in origins:
+            parsed = urlparse(origin)
+            if not parsed.scheme or not parsed.netloc:
+                raise RuntimeError("CORS origin must include scheme and host")
     return origins
 
 
@@ -71,42 +102,61 @@ async def request_context(request: Request, call_next):
 
     if request.url.path.endswith("/rag/ask"):
         forwarded_for = request.headers.get("X-Forwarded-For", "")
-        if forwarded_for:
-            key = forwarded_for.split(",")[0].strip()
-        else:
-            key = request.client.host if request.client else "unknown"
+        key = _extract_client_ip(forwarded_for, request.client.host if request.client else None)
         if not rate_limiter.allow(key, settings.rate_limit_per_minute):
             duration_ms = (time.perf_counter() - start) * 1000
-            logger.info(
-                json.dumps(
-                    {
-                        "request_id": request_id,
-                        "method": request.method,
-                        "path": request.url.path,
-                        "status_code": 429,
-                        "duration_ms": round(duration_ms, 2),
-                    }
-                )
+            _log_request(request, request_id, key, 429, duration_ms)
+            response = JSONResponse(
+                status_code=429,
+                content={"detail": "Rate limit exceeded", "request_id": request_id},
             )
-            response = JSONResponse(status_code=429, content={"detail": "Rate limit exceeded"})
             response.headers["X-Request-ID"] = request_id
             return response
 
-    response = await call_next(request)
-    duration_ms = (time.perf_counter() - start) * 1000
-    logger.info(
-        json.dumps(
-            {
+    try:
+        response = await call_next(request)
+    except Exception:
+        duration_ms = (time.perf_counter() - start) * 1000
+        client_ip = request.client.host if request.client else None
+        logger.exception(
+            "request_failed",
+            extra={
                 "request_id": request_id,
                 "method": request.method,
                 "path": request.url.path,
-                "status_code": response.status_code,
+                "status_code": 500,
                 "duration_ms": round(duration_ms, 2),
-            }
+                "client_ip": client_ip,
+            },
         )
-    )
+        raise
+    duration_ms = (time.perf_counter() - start) * 1000
+    _log_request(request, request_id, request.client.host if request.client else None, response.status_code, duration_ms)
     response.headers["X-Request-ID"] = request_id
     return response
+
+
+def _extract_client_ip(x_forwarded_for: str, fallback: str | None) -> str:
+    if x_forwarded_for:
+        for value in x_forwarded_for.split(","):
+            candidate = value.strip()
+            if candidate:
+                return candidate
+    return fallback or "unknown"
+
+
+def _log_request(request: Request, request_id: str, client_ip: str | None, status_code: int, duration_ms: float) -> None:
+    logger.info(
+        "request_completed",
+        extra={
+            "request_id": request_id,
+            "method": request.method,
+            "path": request.url.path,
+            "status_code": status_code,
+            "duration_ms": round(duration_ms, 2),
+            "client_ip": client_ip or "unknown",
+        },
+    )
 
 
 app.include_router(connections.router)
