@@ -107,15 +107,33 @@ def reindex_embeddings(db: Session, scan_id: int | None, include_api_routes: boo
         return 0
 
     delete_targets = [(doc["content"]["type"], doc["content"]["id"]) for doc in documents]
+    existing = db.scalars(
+        select(Embedding).where(tuple_(Embedding.item_type, Embedding.item_id).in_(delete_targets))
+    ).all()
+    existing_map = {(item.item_type, item.item_id): item for item in existing}
+
+    to_index: list[dict[str, Any]] = []
+    for doc in documents:
+        content_hash = _hash_content(doc["text"])
+        doc["content_hash"] = content_hash
+        key = (doc["content"]["type"], doc["content"]["id"])
+        if key in existing_map and existing_map[key].content_hash == content_hash:
+            continue
+        to_index.append(doc)
+
+    if not to_index:
+        return 0
+
+    delete_targets = [(doc["content"]["type"], doc["content"]["id"]) for doc in to_index]
     db.execute(
         delete(Embedding).where(
             tuple_(Embedding.item_type, Embedding.item_id).in_(delete_targets)
         )
     )
 
-    embeddings = embed_texts([doc["text"] for doc in documents])
-    for doc, vector in zip(documents, embeddings):
-        content_hash = _hash_content(doc["text"])
+    embeddings = embed_texts([doc["text"] for doc in to_index])
+    for doc, vector in zip(to_index, embeddings):
+        content_hash = doc["content_hash"]
         db.add(
             Embedding(
                 item_type=doc["content"]["type"],
@@ -126,7 +144,7 @@ def reindex_embeddings(db: Session, scan_id: int | None, include_api_routes: boo
             )
         )
     db.commit()
-    return len(documents)
+    return len(to_index)
 
 
 def search_embeddings(db: Session, question: str, top_k: int) -> list[Embedding]:

@@ -1,8 +1,8 @@
 import { Box, Card, CardContent, Divider, Grid, MenuItem, TextField, Typography } from "@mui/material";
-import { useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useConnections } from "../../controllers/useConnections";
 import { useScans, useSchema } from "../../controllers/useScans";
-import { updateColumnAnnotations, updateTableAnnotations } from "../../services/catalogService";
+import { useUpdateColumnAnnotations, useUpdateTableAnnotations } from "../../controllers/useAnnotations";
 import TagEditor from "../components/TagEditor";
 
 const TablesPage = () => {
@@ -11,6 +11,46 @@ const TablesPage = () => {
   const { data: scans } = useScans(connectionId);
   const [scanId, setScanId] = useState<number | undefined>();
   const { data: schema } = useSchema(scanId);
+  const updateTableMutation = useUpdateTableAnnotations(scanId);
+  const updateColumnMutation = useUpdateColumnAnnotations(scanId);
+  const [tableTags, setTableTags] = useState<Record<number, string[]>>({});
+  const [columnTags, setColumnTags] = useState<Record<number, string[]>>({});
+  const tableTimers = useRef(new Map<number, number>());
+  const columnTimers = useRef(new Map<number, number>());
+
+  const scheduleTableUpdate = useCallback(
+    (tableId: number, tags: string[], baseAnnotations: Record<string, unknown> = {}) => {
+      setTableTags((prev) => ({ ...prev, [tableId]: tags }));
+      const existing = tableTimers.current.get(tableId);
+      if (existing) window.clearTimeout(existing);
+      const timeout = window.setTimeout(() => {
+        updateTableMutation.mutate({
+          tableId,
+          payload: { annotations: { ...baseAnnotations, tags } }
+        });
+        tableTimers.current.delete(tableId);
+      }, 400);
+      tableTimers.current.set(tableId, timeout);
+    },
+    [updateTableMutation]
+  );
+
+  const scheduleColumnUpdate = useCallback(
+    (columnId: number, tags: string[], baseAnnotations: Record<string, unknown> = {}) => {
+      setColumnTags((prev) => ({ ...prev, [columnId]: tags }));
+      const existing = columnTimers.current.get(columnId);
+      if (existing) window.clearTimeout(existing);
+      const timeout = window.setTimeout(() => {
+        updateColumnMutation.mutate({
+          columnId,
+          payload: { annotations: { ...baseAnnotations, tags } }
+        });
+        columnTimers.current.delete(columnId);
+      }, 400);
+      columnTimers.current.set(columnId, timeout);
+    },
+    [updateColumnMutation]
+  );
 
   return (
     <Box>
@@ -59,11 +99,9 @@ const TablesPage = () => {
                   {table.description || "Sem descrição"}
                 </Typography>
                 <TagEditor
-                  value={(table.annotations?.tags as string[]) || []}
+                  value={tableTags[table.id] || (table.annotations?.tags as string[]) || []}
                   onChange={(tags) =>
-                    updateTableAnnotations(table.id, {
-                      annotations: { ...(table.annotations || {}), tags }
-                    })
+                    scheduleTableUpdate(table.id, tags, (table.annotations as Record<string, unknown>) || {})
                   }
                 />
                 <Divider sx={{ my: 2 }} />
@@ -80,11 +118,13 @@ const TablesPage = () => {
                             {column.data_type}
                           </Typography>
                           <TagEditor
-                            value={(column.annotations?.tags as string[]) || []}
+                            value={columnTags[column.id] || (column.annotations?.tags as string[]) || []}
                             onChange={(tags) =>
-                              updateColumnAnnotations(column.id, {
-                                annotations: { ...(column.annotations || {}), tags }
-                              })
+                              scheduleColumnUpdate(
+                                column.id,
+                                tags,
+                                (column.annotations as Record<string, unknown>) || {}
+                              )
                             }
                           />
                         </CardContent>

@@ -1,7 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.db import get_db
+from app.db import get_db, SessionLocal
 from app.models import Connection, Scan
 from app.schemas import ConnectionCreate, ConnectionUpdate, ConnectionOut, ScanOut
 from app.security import encrypt_secret, decrypt_secret, EncryptionError
@@ -83,12 +83,12 @@ def test_connection(connection_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/{connection_id}/scan", response_model=ScanOut)
-def scan_connection(connection_id: int, db: Session = Depends(get_db)):
+def scan_connection(connection_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     connection = db.get(Connection, connection_id)
     if not connection:
         raise HTTPException(status_code=404, detail="Connection not found")
     password = decrypt_secret(connection.password_encrypted)
-    scan = Scan(connection_id=connection.id)
+    scan = Scan(connection_id=connection.id, status="running")
     db.add(scan)
     db.commit()
     db.refresh(scan)
@@ -101,8 +101,16 @@ def scan_connection(connection_id: int, db: Session = Depends(get_db)):
         password=password,
         ssl_mode=connection.ssl_mode,
     )
-    run_scan(db, info, scan_id=scan.id)
+    background_tasks.add_task(_run_scan_background, info, scan.id)
     return scan
+
+
+def _run_scan_background(info: ConnectionInfo, scan_id: int) -> None:
+    session = SessionLocal()
+    try:
+        run_scan(session, info, scan_id=scan_id)
+    finally:
+        session.close()
 
 
 @router.get("/{connection_id}/scans", response_model=list[ScanOut])

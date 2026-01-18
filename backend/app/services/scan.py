@@ -3,12 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 import re
+from datetime import datetime
 
 from sqlalchemy import text
 from sqlalchemy.engine import create_engine
 from sqlalchemy.orm import Session
 
-from app.models import DbSchema, DbTable, DbColumn, DbConstraint, DbIndex, DbView, Sample
+from app.models import DbSchema, DbTable, DbColumn, DbConstraint, DbIndex, DbView, Sample, Scan
 
 
 @dataclass
@@ -112,62 +113,78 @@ def test_connection(info: ConnectionInfo) -> None:
 
 
 def run_scan(db: Session, connection_info: ConnectionInfo, scan_id: int, sample_limit: int = 20) -> None:
+    scan = db.get(Scan, scan_id)
+    if scan and scan.status != "running":
+        scan.status = "running"
+        scan.started_at = scan.started_at or datetime.utcnow()
+        db.commit()
+
     client_engine = _build_client_engine(connection_info)
-    with client_engine.connect() as conn:
-        schemas = conn.execute(text(SCHEMA_QUERY)).fetchall()
-        for (schema_name,) in schemas:
-            schema = DbSchema(scan_id=scan_id, name=schema_name)
-            db.add(schema)
-            db.flush()
-
-            views = conn.execute(text(VIEW_QUERY), {"schema_name": schema_name}).fetchall()
-            for view_name, definition in views:
-                db.add(DbView(schema_id=schema.id, name=view_name, definition=definition))
-
-            tables = conn.execute(text(TABLE_QUERY), {"schema_name": schema_name}).fetchall()
-            for table_schema, table_name, table_type in tables:
-                table = DbTable(schema_id=schema.id, name=table_name, table_type=table_type)
-                db.add(table)
+    try:
+        with client_engine.connect() as conn:
+            schemas = conn.execute(text(SCHEMA_QUERY)).fetchall()
+            for (schema_name,) in schemas:
+                schema = DbSchema(scan_id=scan_id, name=schema_name)
+                db.add(schema)
                 db.flush()
 
-                columns = conn.execute(
-                    text(COLUMN_QUERY), {"schema_name": table_schema, "table_name": table_name}
-                ).fetchall()
-                for column_name, data_type, is_nullable, column_default in columns:
-                    db.add(
-                        DbColumn(
-                            table_id=table.id,
-                            name=column_name,
-                            data_type=data_type,
-                            is_nullable=is_nullable == "YES",
-                            default=column_default,
+                views = conn.execute(text(VIEW_QUERY), {"schema_name": schema_name}).fetchall()
+                for view_name, definition in views:
+                    db.add(DbView(schema_id=schema.id, name=view_name, definition=definition))
+
+                tables = conn.execute(text(TABLE_QUERY), {"schema_name": schema_name}).fetchall()
+                for table_schema, table_name, table_type in tables:
+                    table = DbTable(schema_id=schema.id, name=table_name, table_type=table_type)
+                    db.add(table)
+                    db.flush()
+
+                    columns = conn.execute(
+                        text(COLUMN_QUERY), {"schema_name": table_schema, "table_name": table_name}
+                    ).fetchall()
+                    for column_name, data_type, is_nullable, column_default in columns:
+                        db.add(
+                            DbColumn(
+                                table_id=table.id,
+                                name=column_name,
+                                data_type=data_type,
+                                is_nullable=is_nullable == "YES",
+                                default=column_default,
+                            )
                         )
-                    )
 
-                constraints = conn.execute(
-                    text(CONSTRAINT_QUERY), {"schema_name": table_schema, "table_name": table_name}
-                ).fetchall()
-                for name, constraint_type, definition in constraints:
-                    db.add(
-                        DbConstraint(
-                            table_id=table.id,
-                            name=name,
-                            constraint_type=constraint_type,
-                            definition=definition,
+                    constraints = conn.execute(
+                        text(CONSTRAINT_QUERY), {"schema_name": table_schema, "table_name": table_name}
+                    ).fetchall()
+                    for name, constraint_type, definition in constraints:
+                        db.add(
+                            DbConstraint(
+                                table_id=table.id,
+                                name=name,
+                                constraint_type=constraint_type,
+                                definition=definition,
+                            )
                         )
-                    )
 
-                indexes = conn.execute(
-                    text(INDEX_QUERY), {"schema_name": table_schema, "table_name": table_name}
-                ).fetchall()
-                for index_name, definition in indexes:
-                    db.add(DbIndex(table_id=table.id, name=index_name, definition=definition))
+                    indexes = conn.execute(
+                        text(INDEX_QUERY), {"schema_name": table_schema, "table_name": table_name}
+                    ).fetchall()
+                    for index_name, definition in indexes:
+                        db.add(DbIndex(table_id=table.id, name=index_name, definition=definition))
 
-                sample_rows = _fetch_samples(conn, table_schema, table_name, sample_limit)
-                if sample_rows:
-                    db.add(Sample(table_id=table.id, rows=sample_rows))
+                    sample_rows = _fetch_samples(conn, table_schema, table_name, sample_limit)
+                    if sample_rows:
+                        db.add(Sample(table_id=table.id, rows=sample_rows))
 
-    db.commit()
+        if scan:
+            scan.status = "completed"
+            scan.finished_at = datetime.utcnow()
+        db.commit()
+    except Exception:
+        if scan:
+            scan.status = "failed"
+            scan.finished_at = datetime.utcnow()
+            db.commit()
+        raise
 
 
 def _fetch_samples(conn, schema_name: str, table_name: str, sample_limit: int) -> list[dict[str, Any]]:

@@ -13,11 +13,12 @@ def _get_fernet() -> Fernet:
         raise EncryptionError("APP_ENCRYPTION_KEY is required")
     key_bytes = settings.app_encryption_key.encode("utf-8")
     try:
-        base64.urlsafe_b64decode(key_bytes)
-        fernet_key = key_bytes
-    except Exception:
-        fernet_key = base64.urlsafe_b64encode(key_bytes.ljust(32, b"_"))
-    return Fernet(fernet_key)
+        decoded = base64.urlsafe_b64decode(key_bytes)
+    except Exception as exc:
+        raise EncryptionError("APP_ENCRYPTION_KEY must be a valid Fernet key") from exc
+    if len(decoded) != 32:
+        raise EncryptionError("APP_ENCRYPTION_KEY must be a 32-byte urlsafe base64 value")
+    return Fernet(key_bytes)
 
 
 def encrypt_secret(value: str) -> str:

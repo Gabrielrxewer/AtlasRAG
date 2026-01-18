@@ -37,7 +37,7 @@ class Scan(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     connection_id: Mapped[int] = mapped_column(ForeignKey("connections.id"), nullable=False)
-    status: Mapped[str] = mapped_column(String(50), nullable=False, default="completed")
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default="running")
     started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime)
 
