@@ -1,3 +1,4 @@
+import json
 import logging
 import time
 import uuid
@@ -66,19 +67,22 @@ async def add_request_id(request: Request, call_next):
     request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
     request.state.request_id = request_id
     start = time.perf_counter()
+    request.state.start_time = start
     response = await call_next(request)
     duration_ms = (time.perf_counter() - start) * 1000
     logger.info(
-        "request_completed",
-        extra={
-            "request_id": request_id,
-            "method": request.method,
-            "path": request.url.path,
-            "status_code": response.status_code,
-            "duration_ms": round(duration_ms, 2),
-        },
+        json.dumps(
+            {
+                "request_id": request_id,
+                "method": request.method,
+                "path": request.url.path,
+                "status_code": response.status_code,
+                "duration_ms": round(duration_ms, 2),
+            }
+        )
     )
-    response.headers["x-request-id"] = request_id
+    response.headers["X-Request-ID"] = request_id
+    response.headers.setdefault("x-request-id", request_id)
     return response
 
 
@@ -87,6 +91,19 @@ async def rag_rate_limit(request: Request, call_next):
     if request.url.path.endswith("/rag/ask"):
         key = request.client.host if request.client else "unknown"
         if not rate_limiter.allow(key, settings.rate_limit_per_minute):
+            start_time = getattr(request.state, "start_time", time.perf_counter())
+            duration_ms = (time.perf_counter() - start_time) * 1000
+            logger.info(
+                json.dumps(
+                    {
+                        "request_id": request.state.request_id,
+                        "method": request.method,
+                        "path": request.url.path,
+                        "status_code": 429,
+                        "duration_ms": round(duration_ms, 2),
+                    }
+                )
+            )
             raise HTTPException(status_code=429, detail="Rate limit exceeded")
     return await call_next(request)
 

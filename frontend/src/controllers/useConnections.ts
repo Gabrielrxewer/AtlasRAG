@@ -25,6 +25,9 @@ export const useScanConnection = () => {
   const client = useQueryClient();
   return useMutation({
     mutationFn: scanConnection,
-    onSuccess: () => client.invalidateQueries({ queryKey: ["scans"] })
+    onSuccess: () =>
+      client.invalidateQueries({
+        predicate: (query) => query.queryKey[0] === "scans"
+      })
   });
 };
