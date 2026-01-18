@@ -7,6 +7,7 @@ from datetime import datetime
 
 from sqlalchemy import text
 from sqlalchemy.engine import create_engine
+from sqlalchemy.engine import URL
 from sqlalchemy.orm import Session
 
 from app.models import DbSchema, DbTable, DbColumn, DbConstraint, DbIndex, DbView, Sample, Scan
@@ -99,9 +100,14 @@ def build_sample_query(schema_name: str, table_name: str, pk_columns: list[str])
 
 
 def _build_client_engine(info: ConnectionInfo):
-    url = (
-        f"postgresql+psycopg2://{info.username}:{info.password}"
-        f"@{info.host}:{info.port}/{info.database}?sslmode={info.ssl_mode}"
+    url = URL.create(
+        "postgresql+psycopg2",
+        username=info.username,
+        password=info.password,
+        host=info.host,
+        port=info.port,
+        database=info.database,
+        query={"sslmode": info.ssl_mode},
     )
     return create_engine(url, pool_pre_ping=True)
 
@@ -114,9 +120,11 @@ def test_connection(info: ConnectionInfo) -> None:
 
 def run_scan(db: Session, connection_info: ConnectionInfo, scan_id: int, sample_limit: int = 20) -> None:
     scan = db.get(Scan, scan_id)
-    if scan and scan.status != "running":
-        scan.status = "running"
-        scan.started_at = scan.started_at or datetime.utcnow()
+    if scan:
+        if scan.status != "running":
+            scan.status = "running"
+        if scan.started_at is None:
+            scan.started_at = datetime.utcnow()
         db.commit()
 
     client_engine = _build_client_engine(connection_info)
