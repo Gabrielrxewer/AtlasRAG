@@ -120,7 +120,7 @@ class ApiRouteOut(ApiRouteCreate):
     id: int
     updated_by: str | None = None
     updated_at: datetime
-    fields: list[ApiRouteFieldIn] = []
+    fields: list[ApiRouteFieldIn] = Field(default_factory=list)
 
     class Config:
         from_attributes = True

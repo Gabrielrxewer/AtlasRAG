@@ -1,5 +1,6 @@
 import pytest
 
+pytest.importorskip("cryptography")
 from app.security import EncryptionError, encrypt_secret
 from app.config import settings
 

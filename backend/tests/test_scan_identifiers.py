@@ -1,3 +1,6 @@
+import pytest
+
+pytest.importorskip("sqlalchemy")
 from app.services.scan import build_sample_query
 
 
