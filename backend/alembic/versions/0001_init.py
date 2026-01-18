@@ -36,7 +36,7 @@ def upgrade() -> None:
         "scans",
         sa.Column("id", sa.Integer, primary_key=True),
         sa.Column("connection_id", sa.Integer, sa.ForeignKey("connections.id"), nullable=False),
-        sa.Column("status", sa.String(50), nullable=False),
+        sa.Column("status", sa.String(50), server_default=sa.text("'running'"), nullable=False),
         sa.Column("started_at", sa.DateTime, server_default=sa.text("now()"), nullable=False),
         sa.Column("finished_at", sa.DateTime, nullable=True),
     )

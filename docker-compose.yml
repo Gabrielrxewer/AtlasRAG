@@ -18,6 +18,9 @@ services:
       DATABASE_URL: postgresql+psycopg2://atlas:atlas@app-db:5432/atlas
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-}
+      ENVIRONMENT: development
+      CORS_ORIGINS: http://localhost:5173,http://localhost:4173
+      CORS_ALLOW_CREDENTIALS: "false"
     depends_on:
       - app-db
     ports:

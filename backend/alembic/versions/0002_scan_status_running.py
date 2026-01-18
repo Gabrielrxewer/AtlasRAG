@@ -19,7 +19,7 @@ def upgrade() -> None:
         "scans",
         "status",
         existing_type=sa.String(length=50),
-        server_default="running",
+        server_default=sa.text("'running'"),
         existing_nullable=False,
     )
 
