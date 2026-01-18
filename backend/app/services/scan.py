@@ -126,6 +126,11 @@ def run_scan(db: Session, connection_info: ConnectionInfo, scan_id: int, sample_
         if scan.started_at is None:
             scan.started_at = datetime.utcnow()
         db.commit()
+        existing_schemas = db.query(DbSchema).filter(DbSchema.scan_id == scan_id).all()
+        for schema in existing_schemas:
+            db.delete(schema)
+        if existing_schemas:
+            db.commit()
 
     client_engine = _build_client_engine(connection_info)
     try:

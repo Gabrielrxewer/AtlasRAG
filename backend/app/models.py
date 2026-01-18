@@ -8,6 +8,7 @@ from sqlalchemy import (
     Text,
     JSON,
     text,
+    func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -27,8 +28,10 @@ class Connection(Base):
     username: Mapped[str] = mapped_column(String(200), nullable=False)
     password_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
     ssl_mode: Mapped[str] = mapped_column(String(50), nullable=False, default="prefer")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()"), onupdate=func.now()
+    )
 
     scans: Mapped[list["Scan"]] = relationship(back_populates="connection", cascade="all, delete-orphan")
 
@@ -39,8 +42,8 @@ class Scan(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     connection_id: Mapped[int] = mapped_column(ForeignKey("connections.id"), nullable=False)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="running")
-    started_at: Mapped[datetime] = mapped_column(DateTime, server_default=text("now()"))
-    finished_at: Mapped[datetime | None] = mapped_column(DateTime)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     connection: Mapped[Connection] = relationship(back_populates="scans")
     schemas: Mapped[list["DbSchema"]] = relationship(back_populates="scan", cascade="all, delete-orphan")
@@ -67,7 +70,9 @@ class DbTable(Base):
     description: Mapped[str | None] = mapped_column(Text)
     annotations: Mapped[dict | None] = mapped_column(JSONB)
     updated_by: Mapped[str | None] = mapped_column(String(100))
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()"), onupdate=func.now()
+    )
 
     schema: Mapped[DbSchema] = relationship(back_populates="tables")
     columns: Mapped[list["DbColumn"]] = relationship(back_populates="table", cascade="all, delete-orphan")
@@ -86,7 +91,9 @@ class DbColumn(Base):
     description: Mapped[str | None] = mapped_column(Text)
     annotations: Mapped[dict | None] = mapped_column(JSONB)
     updated_by: Mapped[str | None] = mapped_column(String(100))
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()"), onupdate=func.now()
+    )
 
     table: Mapped[DbTable] = relationship(back_populates="columns")
 
@@ -125,7 +132,7 @@ class Sample(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     table_id: Mapped[int] = mapped_column(ForeignKey("db_tables.id"), nullable=False)
     rows: Mapped[list] = mapped_column(JSONB, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
 
     table: Mapped[DbTable] = relationship(back_populates="samples")
 
@@ -145,7 +152,9 @@ class ApiRoute(Base):
     description: Mapped[str | None] = mapped_column(Text)
     tags: Mapped[list | None] = mapped_column(JSONB)
     updated_by: Mapped[str | None] = mapped_column(String(100))
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()"), onupdate=func.now()
+    )
 
     fields: Mapped[list["ApiRouteField"]] = relationship(back_populates="route", cascade="all, delete-orphan")
 
@@ -173,4 +182,4 @@ class Embedding(Base):
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     embedding: Mapped[list[float]] = mapped_column(Vector(1536))
     metadata: Mapped[dict | None] = mapped_column(JSONB)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))

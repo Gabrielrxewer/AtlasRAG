@@ -70,7 +70,11 @@ async def request_context(request: Request, call_next):
     start = time.perf_counter()
 
     if request.url.path.endswith("/rag/ask"):
-        key = request.client.host if request.client else "unknown"
+        forwarded_for = request.headers.get("X-Forwarded-For", "")
+        if forwarded_for:
+            key = forwarded_for.split(",")[0].strip()
+        else:
+            key = request.client.host if request.client else "unknown"
         if not rate_limiter.allow(key, settings.rate_limit_per_minute):
             duration_ms = (time.perf_counter() - start) * 1000
             logger.info(

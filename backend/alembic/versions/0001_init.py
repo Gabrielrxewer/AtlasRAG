@@ -28,8 +28,8 @@ def upgrade() -> None:
         sa.Column("username", sa.String(200), nullable=False),
         sa.Column("password_encrypted", sa.Text, nullable=False),
         sa.Column("ssl_mode", sa.String(50), nullable=False),
-        sa.Column("created_at", sa.DateTime, server_default=sa.text("now()"), nullable=False),
-        sa.Column("updated_at", sa.DateTime, server_default=sa.text("now()"), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
     )
 
     op.create_table(
@@ -37,8 +37,8 @@ def upgrade() -> None:
         sa.Column("id", sa.Integer, primary_key=True),
         sa.Column("connection_id", sa.Integer, sa.ForeignKey("connections.id"), nullable=False),
         sa.Column("status", sa.String(50), server_default=sa.text("'running'"), nullable=False),
-        sa.Column("started_at", sa.DateTime, server_default=sa.text("now()"), nullable=False),
-        sa.Column("finished_at", sa.DateTime, nullable=True),
+        sa.Column("started_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
     )
 
     op.create_table(
@@ -57,7 +57,7 @@ def upgrade() -> None:
         sa.Column("description", sa.Text, nullable=True),
         sa.Column("annotations", sa.dialects.postgresql.JSONB, nullable=True),
         sa.Column("updated_by", sa.String(100), nullable=True),
-        sa.Column("updated_at", sa.DateTime, server_default=sa.text("now()"), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
     )
 
     op.create_table(
@@ -71,7 +71,7 @@ def upgrade() -> None:
         sa.Column("description", sa.Text, nullable=True),
         sa.Column("annotations", sa.dialects.postgresql.JSONB, nullable=True),
         sa.Column("updated_by", sa.String(100), nullable=True),
-        sa.Column("updated_at", sa.DateTime, server_default=sa.text("now()"), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
     )
 
     op.create_table(
@@ -104,7 +104,7 @@ def upgrade() -> None:
         sa.Column("id", sa.Integer, primary_key=True),
         sa.Column("table_id", sa.Integer, sa.ForeignKey("db_tables.id"), nullable=False),
         sa.Column("rows", sa.dialects.postgresql.JSONB, nullable=False),
-        sa.Column("created_at", sa.DateTime, server_default=sa.text("now()"), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
     )
 
     op.create_table(
@@ -121,7 +121,7 @@ def upgrade() -> None:
         sa.Column("description", sa.Text, nullable=True),
         sa.Column("tags", sa.dialects.postgresql.JSONB, nullable=True),
         sa.Column("updated_by", sa.String(100), nullable=True),
-        sa.Column("updated_at", sa.DateTime, server_default=sa.text("now()"), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
     )
 
     op.create_table(
@@ -143,7 +143,7 @@ def upgrade() -> None:
         sa.Column("content_hash", sa.String(64), nullable=False),
         sa.Column("embedding", Vector(1536), nullable=True),
         sa.Column("metadata", sa.dialects.postgresql.JSONB, nullable=True),
-        sa.Column("created_at", sa.DateTime, server_default=sa.text("now()"), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
     )
 
 
