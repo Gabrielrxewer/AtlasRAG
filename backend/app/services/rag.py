@@ -144,7 +144,7 @@ def reindex_embeddings(db: Session, scan_id: int | None, include_api_routes: boo
                 item_id=doc["content"]["id"],
                 content_hash=content_hash,
                 embedding=vector,
-                metadata=doc["content"],
+                meta=doc["content"],
             )
         )
     db.commit()
@@ -166,10 +166,10 @@ def search_embeddings(db: Session, question: str, top_k: int) -> list[Embedding]
 
 
 def ask_rag(db: Session, question: str) -> dict[str, Any]:
-    matches = search_embeddings(db, question, settings.rag_top_k)
+    matches = search_embeddings(db, question.strip(), settings.rag_top_k)
     if not matches:
         return {"answer": "Contexto insuficiente para responder com segurança.", "citations": []}
-    context = [match.metadata for match in matches]
+    context = [match.meta for match in matches]
     instructions = (
         "Você é um assistente de catálogo de dados e APIs. "
         "Use apenas o contexto fornecido. Se não houver contexto suficiente, "
