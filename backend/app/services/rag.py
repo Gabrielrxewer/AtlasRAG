@@ -4,7 +4,7 @@ import hashlib
 from typing import Any
 import httpx
 from sqlalchemy.orm import Session
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, tuple_
 
 from app.config import settings
 from app.models import DbTable, DbColumn, ApiRoute, Embedding
@@ -106,7 +106,12 @@ def reindex_embeddings(db: Session, scan_id: int | None, include_api_routes: boo
     if not documents:
         return 0
 
-    db.execute(delete(Embedding))
+    delete_targets = [(doc["content"]["type"], doc["content"]["id"]) for doc in documents]
+    db.execute(
+        delete(Embedding).where(
+            tuple_(Embedding.item_type, Embedding.item_id).in_(delete_targets)
+        )
+    )
 
     embeddings = embed_texts([doc["text"] for doc in documents])
     for doc, vector in zip(documents, embeddings):

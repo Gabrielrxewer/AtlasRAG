@@ -28,9 +28,12 @@ Crie um `.env` (ou exporte no shell) com:
 OPENAI_API_KEY=...
 APP_ENCRYPTION_KEY=change-me-32bytes
 DATABASE_URL=postgresql+psycopg2://atlas:atlas@localhost:5432/atlas
+CORS_ORIGINS=http://localhost:5173,http://localhost:4173
+CORS_ALLOW_CREDENTIALS=false
 ```
 
 > **Nota:** `APP_ENCRYPTION_KEY` é obrigatória para criptografar credenciais de conexão. Não logamos segredos.
+> Configure `CORS_ORIGINS` com uma lista separada por vírgulas (sem `*` quando `CORS_ALLOW_CREDENTIALS=true`).
 
 ## Subir com Docker
 ```

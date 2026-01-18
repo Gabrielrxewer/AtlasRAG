@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     rag_min_score: float = 0.2
     environment: str = "development"
     rate_limit_per_minute: int = 30
+    cors_origins: str = "http://localhost:5173"
+    cors_allow_credentials: bool = False
 
 
 settings = Settings()
