@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+import re
 
 from sqlalchemy import text
 from sqlalchemy.engine import create_engine
@@ -75,6 +76,25 @@ WHERE i.indisprimary
   AND n.nspname = :schema_name
   AND c.relname = :table_name;
 """
+
+IDENTIFIER_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+
+
+def is_safe_identifier(value: str) -> bool:
+    return bool(IDENTIFIER_RE.match(value))
+
+
+def build_sample_query(schema_name: str, table_name: str, pk_columns: list[str]) -> str | None:
+    if not (is_safe_identifier(schema_name) and is_safe_identifier(table_name)):
+        return None
+    for column in pk_columns:
+        if not is_safe_identifier(column):
+            return None
+    order_by = ""
+    if pk_columns:
+        pk_list = ", ".join(pk_columns)
+        order_by = f" ORDER BY {pk_list}"
+    return f"SELECT * FROM {schema_name}.{table_name}{order_by} LIMIT :limit"
 
 
 def _build_client_engine(info: ConnectionInfo):
@@ -151,14 +171,14 @@ def run_scan(db: Session, connection_info: ConnectionInfo, scan_id: int, sample_
 
 
 def _fetch_samples(conn, schema_name: str, table_name: str, sample_limit: int) -> list[dict[str, Any]]:
-    pk_columns = [row[0] for row in conn.execute(text(PRIMARY_KEY_QUERY), {"schema_name": schema_name, "table_name": table_name})]
-    order_by = ""
-    if pk_columns:
-        pk_list = ", ".join(pk_columns)
-        order_by = f"ORDER BY {pk_list}"
-    query = text(
-        f"SELECT * FROM {schema_name}.{table_name} {order_by} LIMIT :limit"
-    )
+    pk_columns = [
+        row[0]
+        for row in conn.execute(text(PRIMARY_KEY_QUERY), {"schema_name": schema_name, "table_name": table_name})
+    ]
+    query_text = build_sample_query(schema_name, table_name, pk_columns)
+    if not query_text:
+        return []
+    query = text(query_text)
     result = conn.execute(query, {"limit": sample_limit})
     columns = result.keys()
     return [dict(zip(columns, row)) for row in result.fetchall()]
