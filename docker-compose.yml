@@ -1,0 +1,28 @@
+version: "3.9"
+
+services:
+  app-db:
+    image: ankane/pgvector:pg16
+    environment:
+      POSTGRES_USER: atlas
+      POSTGRES_PASSWORD: atlas
+      POSTGRES_DB: atlas
+    ports:
+      - "5432:5432"
+    volumes:
+      - app_db_data:/var/lib/postgresql/data
+
+  backend:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql+psycopg2://atlas:atlas@app-db:5432/atlas
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-}
+    depends_on:
+      - app-db
+    ports:
+      - "8000:8000"
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+volumes:
+  app_db_data:
