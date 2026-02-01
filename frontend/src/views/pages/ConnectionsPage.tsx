@@ -40,6 +40,7 @@ const ConnectionsPage = () => {
       </Typography>
       <Typography variant="body1" sx={{ mb: 3 }}>
         Cadastre conexões com bancos externos para que os agentes possam consultar dados fora da base principal.
+        O banco padrão do aplicativo fica separado e é usado apenas para armazenar o catálogo e as conexões.
       </Typography>
       <Card sx={{ mb: 3 }}>
         <CardContent>

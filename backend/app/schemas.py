@@ -146,3 +146,60 @@ class RagAskOut(BaseModel):
 class RagIndexIn(BaseModel):
     scan_id: int | None = None
     include_api_routes: bool = True
+
+
+class AgentCreate(BaseModel):
+    name: str
+    role: str | None = None
+    template: str | None = None
+    model: str
+    base_prompt: str
+    rag_prompt: str | None = None
+    enable_rag: bool = True
+    allow_db: bool = True
+    allow_apis: bool = True
+    connection_ids: list[int] = Field(default_factory=list)
+    api_route_ids: list[int] = Field(default_factory=list)
+
+
+class AgentUpdate(BaseModel):
+    name: str | None = None
+    role: str | None = None
+    template: str | None = None
+    model: str | None = None
+    base_prompt: str | None = None
+    rag_prompt: str | None = None
+    enable_rag: bool | None = None
+    allow_db: bool | None = None
+    allow_apis: bool | None = None
+    connection_ids: list[int] | None = None
+    api_route_ids: list[int] | None = None
+
+
+class AgentOut(AgentCreate):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class AgentMessageCreate(BaseModel):
+    content: str
+
+
+class AgentMessageOut(BaseModel):
+    id: int
+    agent_id: int
+    role: str
+    content: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class AgentChatResponse(BaseModel):
+    message: AgentMessageOut
+    citations: list[dict] = Field(default_factory=list)

@@ -12,7 +12,10 @@ router = APIRouter(prefix="/connections", tags=["connections"])
 
 @router.post("", response_model=ConnectionOut)
 def create_connection(payload: ConnectionCreate, db: Session = Depends(get_db)):
-    encrypted = encrypt_secret(payload.password)
+    try:
+        encrypted = encrypt_secret(payload.password)
+    except EncryptionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     connection = Connection(
         name=payload.name,
         host=payload.host,
@@ -40,7 +43,10 @@ def update_connection(connection_id: int, payload: ConnectionUpdate, db: Session
         raise HTTPException(status_code=404, detail="Connection not found")
     for field, value in payload.model_dump(exclude_unset=True).items():
         if field == "password":
-            connection.password_encrypted = encrypt_secret(value)
+            try:
+                connection.password_encrypted = encrypt_secret(value)
+            except EncryptionError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
         else:
             setattr(connection, field, value)
     db.commit()
