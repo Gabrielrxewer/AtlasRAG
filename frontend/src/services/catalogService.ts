@@ -1,5 +1,15 @@
 import api from "./api";
-import { ApiRoute, Connection, RagAnswer, Sample, Scan, TableSchema } from "../models/types";
+import {
+  ApiRoute,
+  Connection,
+  RagAnswer,
+  Sample,
+  Scan,
+  TableSchema,
+  Agent,
+  AgentMessage,
+  AgentChatResponse
+} from "../models/types";
 
 export const listConnections = async (): Promise<Connection[]> => {
   const { data } = await api.get("/connections");
@@ -73,5 +83,28 @@ export const askRag = async (question: string): Promise<RagAnswer> => {
 
 export const reindexRag = async (payload: Record<string, unknown>) => {
   const { data } = await api.post("/rag/index", payload);
+  return data;
+};
+
+export const listAgents = async (): Promise<Agent[]> => {
+  const { data } = await api.get("/agents");
+  return data;
+};
+
+export const createAgent = async (payload: Record<string, unknown>): Promise<Agent> => {
+  const { data } = await api.post("/agents", payload);
+  return data;
+};
+
+export const listAgentMessages = async (agentId: number): Promise<AgentMessage[]> => {
+  const { data } = await api.get(`/agents/${agentId}/messages`);
+  return data;
+};
+
+export const sendAgentMessage = async (
+  agentId: number,
+  payload: Record<string, unknown>
+): Promise<AgentChatResponse> => {
+  const { data } = await api.post(`/agents/${agentId}/messages`, payload);
   return data;
 };

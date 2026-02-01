@@ -16,46 +16,48 @@ import {
   TextField,
   Typography
 } from "@mui/material";
-import { useState } from "react";
-
-const agents = [
-  {
-    id: "produto",
-    name: "Especialista em Produtos",
-    description: "Responde dúvidas sobre catálogo e disponibilidade."
-  },
-  {
-    id: "suporte",
-    name: "Assistente de Suporte",
-    description: "Ajuda clientes a resolver incidentes e tickets."
-  },
-  {
-    id: "financeiro",
-    name: "Analista Financeiro",
-    description: "Explica faturas, pagamentos e política de cobrança."
-  }
-];
-
-const chatHistory = [
-  {
-    id: 1,
-    agent: "Especialista em Produtos",
-    preview: "Posso consultar o estoque em tempo real?",
-    tag: "Hoje"
-  },
-  {
-    id: 2,
-    agent: "Assistente de Suporte",
-    preview: "Temos SLA para incidentes críticos?",
-    tag: "Ontem"
-  }
-];
+import { useEffect, useMemo, useState } from "react";
+import { useAgentMessages, useAgents, useSendAgentMessage } from "../../controllers/useAgents";
 
 const AgentChatPage = () => {
-  const [selectedAgent, setSelectedAgent] = useState(agents[0].id);
+  const { data: agents = [] } = useAgents();
+  const [selectedAgent, setSelectedAgent] = useState<number | "">(agents[0]?.id ?? "");
   const [message, setMessage] = useState("");
-
   const activeAgent = agents.find((agent) => agent.id === selectedAgent);
+  const { data: messages = [] } = useAgentMessages(typeof selectedAgent === "number" ? selectedAgent : undefined);
+  const sendMessage = useSendAgentMessage(typeof selectedAgent === "number" ? selectedAgent : undefined);
+
+  useEffect(() => {
+    if (agents.length && selectedAgent === "") {
+      setSelectedAgent(agents[0].id);
+    }
+  }, [agents, selectedAgent]);
+
+  const recentConversations = useMemo(() => {
+    return agents.map((agent) => {
+      const lastMessage = messages
+        .filter((item) => item.agent_id === agent.id)
+        .slice(-1)[0];
+      return {
+        id: agent.id,
+        agent: agent.name,
+        preview: lastMessage?.content ?? "Sem mensagens ainda",
+        tag: lastMessage ? "Recente" : "Novo"
+      };
+    });
+  }, [agents, messages]);
+
+  const handleSend = () => {
+    if (!message.trim() || typeof selectedAgent !== "number") {
+      return;
+    }
+    sendMessage.mutate(
+      { content: message },
+      {
+        onSuccess: () => setMessage("")
+      }
+    );
+  };
 
   return (
     <Box>
@@ -74,7 +76,7 @@ const AgentChatPage = () => {
               Conversas recentes
             </Typography>
             <List disablePadding>
-              {chatHistory.map((item) => (
+              {recentConversations.map((item) => (
                 <ListItem key={item.id} sx={{ px: 0 }}>
                   <Box sx={{ width: "100%" }}>
                     <Stack direction="row" alignItems="center" spacing={1}>
@@ -90,6 +92,11 @@ const AgentChatPage = () => {
                   </Box>
                 </ListItem>
               ))}
+              {!recentConversations.length && (
+                <Typography variant="body2" color="text.secondary">
+                  Nenhum agente cadastrado ainda.
+                </Typography>
+              )}
             </List>
           </CardContent>
         </Card>
@@ -103,7 +110,7 @@ const AgentChatPage = () => {
                   labelId="agent-select-label"
                   label="Agente"
                   value={selectedAgent}
-                  onChange={(event) => setSelectedAgent(event.target.value)}
+                  onChange={(event) => setSelectedAgent(event.target.value as number)}
                 >
                   {agents.map((agent) => (
                     <MenuItem key={agent.id} value={agent.id}>
@@ -115,7 +122,7 @@ const AgentChatPage = () => {
               <Box>
                 <Typography variant="subtitle2">Perfil do agente</Typography>
                 <Typography variant="body2" color="text.secondary">
-                  {activeAgent?.description}
+                  {activeAgent?.role || "Selecione um agente para ver o perfil."}
                 </Typography>
               </Box>
             </Box>
@@ -123,25 +130,22 @@ const AgentChatPage = () => {
             <Divider sx={{ mb: 2 }} />
 
             <Stack spacing={2} sx={{ mb: 3 }}>
-              <Box sx={{ display: "flex", gap: 2, alignItems: "flex-start" }}>
-                <Avatar sx={{ bgcolor: "primary.main" }}>U</Avatar>
-                <Box>
-                  <Typography variant="subtitle2">Você</Typography>
-                  <Typography variant="body2">
-                    Quais fontes externas você pode consultar para responder sobre disponibilidade?
-                  </Typography>
+              {messages.map((item) => (
+                <Box key={item.id} sx={{ display: "flex", gap: 2, alignItems: "flex-start" }}>
+                  <Avatar sx={{ bgcolor: item.role === "user" ? "primary.main" : "secondary.main" }}>
+                    {item.role === "user" ? "U" : "A"}
+                  </Avatar>
+                  <Box>
+                    <Typography variant="subtitle2">{item.role === "user" ? "Você" : activeAgent?.name}</Typography>
+                    <Typography variant="body2">{item.content}</Typography>
+                  </Box>
                 </Box>
-              </Box>
-              <Box sx={{ display: "flex", gap: 2, alignItems: "flex-start" }}>
-                <Avatar sx={{ bgcolor: "secondary.main" }}>A</Avatar>
-                <Box>
-                  <Typography variant="subtitle2">{activeAgent?.name}</Typography>
-                  <Typography variant="body2">
-                    Posso consultar o PostgreSQL do data lake, o catálogo de produtos no MongoDB e as APIs do
-                    CRM para validar disponibilidade em tempo real.
-                  </Typography>
-                </Box>
-              </Box>
+              ))}
+              {!messages.length && (
+                <Typography variant="body2" color="text.secondary">
+                  Nenhuma mensagem enviada ainda.
+                </Typography>
+              )}
             </Stack>
 
             <TextField
@@ -154,7 +158,9 @@ const AgentChatPage = () => {
               placeholder="Pergunte algo ao agente selecionado"
             />
             <Box sx={{ display: "flex", justifyContent: "flex-end", mt: 2 }}>
-              <Button variant="contained">Enviar</Button>
+              <Button variant="contained" onClick={handleSend} disabled={sendMessage.isPending}>
+                Enviar
+              </Button>
             </Box>
           </CardContent>
         </Card>

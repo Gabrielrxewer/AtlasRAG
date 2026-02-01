@@ -72,3 +72,33 @@ export type RagAnswer = {
   answer: string;
   citations: { item_type: string; item_id: number }[];
 };
+
+export type Agent = {
+  id: number;
+  name: string;
+  role?: string | null;
+  template?: string | null;
+  model: string;
+  base_prompt: string;
+  rag_prompt?: string | null;
+  enable_rag: boolean;
+  allow_db: boolean;
+  allow_apis: boolean;
+  connection_ids: number[];
+  api_route_ids: number[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type AgentMessage = {
+  id: number;
+  agent_id: number;
+  role: string;
+  content: string;
+  created_at: string;
+};
+
+export type AgentChatResponse = {
+  message: AgentMessage;
+  citations: { item_type: string; item_id: number }[];
+};

@@ -185,3 +185,38 @@ class Embedding(Base):
     embedding: Mapped[list[float]] = mapped_column(Vector(EMBEDDING_DIM))
     meta: Mapped[dict | None] = mapped_column("metadata", JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+
+
+class Agent(Base):
+    __tablename__ = "agents"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    role: Mapped[str | None] = mapped_column(String(500))
+    template: Mapped[str | None] = mapped_column(String(200))
+    model: Mapped[str] = mapped_column(String(200), nullable=False)
+    base_prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    rag_prompt: Mapped[str | None] = mapped_column(Text)
+    enable_rag: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    allow_db: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    allow_apis: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    connection_ids: Mapped[list[int]] = mapped_column(JSONB, nullable=False, default=list)
+    api_route_ids: Mapped[list[int]] = mapped_column(JSONB, nullable=False, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()"), onupdate=func.now()
+    )
+
+    messages: Mapped[list["AgentMessage"]] = relationship(back_populates="agent", cascade="all, delete-orphan")
+
+
+class AgentMessage(Base):
+    __tablename__ = "agent_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    agent_id: Mapped[int] = mapped_column(ForeignKey("agents.id"), nullable=False)
+    role: Mapped[str] = mapped_column(String(50), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+
+    agent: Mapped[Agent] = relationship(back_populates="messages")

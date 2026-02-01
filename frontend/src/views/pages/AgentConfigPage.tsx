@@ -17,61 +17,76 @@ import {
   Typography
 } from "@mui/material";
 import { useMemo, useState } from "react";
-
-const agentTemplates = [
-  {
-    id: "atendimento",
-    name: "Atendimento ao cliente",
-    description: "Focado em suporte e abertura de tickets."
-  },
-  {
-    id: "comercial",
-    name: "Especialista comercial",
-    description: "Dúvidas sobre planos, preços e upsell."
-  },
-  {
-    id: "operacoes",
-    name: "Operações & logística",
-    description: "Regras internas, estoque e SLA."
-  }
-];
-
-const gptModels = ["GPT-4o", "GPT-4.1", "GPT-4.1-mini", "GPT-3.5 Turbo"];
-
-const connectionOptions = [
-  "PostgreSQL - Data Lake",
-  "MongoDB - Catálogo de produtos",
-  "API CRM",
-  "API Helpdesk",
-  "Redis Cache",
-  "S3 Documentos"
-];
+import { useConnections } from "../../controllers/useConnections";
+import { useApiRoutes } from "../../controllers/useApiRoutes";
+import { useCreateAgent } from "../../controllers/useAgents";
 
 const AgentConfigPage = () => {
-  const [templateId, setTemplateId] = useState(agentTemplates[0].id);
-  const [model, setModel] = useState(gptModels[0]);
+  const { data: connections = [] } = useConnections();
+  const { data: apiRoutes = [] } = useApiRoutes();
+  const createAgent = useCreateAgent();
+  const [template, setTemplate] = useState("");
+  const [model, setModel] = useState("");
   const [agentName, setAgentName] = useState("");
   const [agentRole, setAgentRole] = useState("");
   const [basePrompt, setBasePrompt] = useState("");
   const [ragPrompt, setRagPrompt] = useState("");
-  const [connections, setConnections] = useState<string[]>([]);
+  const [selectedConnections, setSelectedConnections] = useState<number[]>([]);
+  const [selectedApiRoutes, setSelectedApiRoutes] = useState<number[]>([]);
   const [useDatabase, setUseDatabase] = useState(true);
   const [useApis, setUseApis] = useState(true);
   const [enableRag, setEnableRag] = useState(true);
 
   const summary = useMemo(
     () => ({
-      connections: connections.length ? connections : ["Nenhuma fonte selecionada"],
+      connections: selectedConnections.length
+        ? connections
+            .filter((connection) => selectedConnections.includes(connection.id))
+            .map((connection) => connection.name)
+        : ["Nenhuma fonte selecionada"],
+      apiRoutes: selectedApiRoutes.length
+        ? apiRoutes
+            .filter((route) => selectedApiRoutes.includes(route.id))
+            .map((route) => route.name)
+        : ["Nenhuma API selecionada"],
       features: [
         enableRag ? "RAG habilitado" : "RAG desativado",
         useDatabase ? "Consulta bancos de dados" : "Sem consultas a DB",
         useApis ? "Consulta APIs" : "Sem consultas a API"
       ],
-      model,
-      template: agentTemplates.find((template) => template.id === templateId)?.name ?? "Não definido"
+      model: model || "Não definido",
+      template: template || "Não definido"
     }),
-    [connections, enableRag, model, templateId, useApis, useDatabase]
+    [
+      apiRoutes,
+      connections,
+      enableRag,
+      model,
+      selectedApiRoutes,
+      selectedConnections,
+      template,
+      useApis,
+      useDatabase
+    ]
   );
+
+  const isSaveDisabled = !agentName.trim() || !model.trim() || !basePrompt.trim();
+
+  const handleSaveAgent = () => {
+    createAgent.mutate({
+      name: agentName,
+      role: agentRole || null,
+      template: template || null,
+      model: model,
+      base_prompt: basePrompt,
+      rag_prompt: ragPrompt || null,
+      enable_rag: enableRag,
+      allow_db: useDatabase,
+      allow_apis: useApis,
+      connection_ids: selectedConnections,
+      api_route_ids: selectedApiRoutes
+    });
+  };
 
   return (
     <Box>
@@ -91,36 +106,20 @@ const AgentConfigPage = () => {
                 Identidade do agente
               </Typography>
               <Box sx={{ display: "grid", gap: 2, gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" } }}>
-                <FormControl fullWidth>
-                  <InputLabel id="template-label">Template do agente</InputLabel>
-                  <Select
-                    labelId="template-label"
-                    value={templateId}
-                    label="Template do agente"
-                    onChange={(event) => setTemplateId(event.target.value)}
-                  >
-                    {agentTemplates.map((template) => (
-                      <MenuItem key={template.id} value={template.id}>
-                        <ListItemText primary={template.name} secondary={template.description} />
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-                <FormControl fullWidth>
-                  <InputLabel id="model-label">Modelo GPT</InputLabel>
-                  <Select
-                    labelId="model-label"
-                    value={model}
-                    label="Modelo GPT"
-                    onChange={(event) => setModel(event.target.value)}
-                  >
-                    {gptModels.map((option) => (
-                      <MenuItem key={option} value={option}>
-                        {option}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
+                <TextField
+                  label="Template do agente"
+                  value={template}
+                  onChange={(event) => setTemplate(event.target.value)}
+                  placeholder="Ex.: Atendimento ao cliente"
+                  fullWidth
+                />
+                <TextField
+                  label="Modelo GPT"
+                  value={model}
+                  onChange={(event) => setModel(event.target.value)}
+                  placeholder="Ex.: gpt-4o-mini"
+                  fullWidth
+                />
                 <TextField
                   label="Nome do agente"
                   value={agentName}
@@ -172,25 +171,51 @@ const AgentConfigPage = () => {
               <Typography variant="h6" sx={{ mb: 2 }}>
                 Fontes de dados e APIs
               </Typography>
-              <FormControl fullWidth>
-                <InputLabel id="connections-label">Selecione conexões e APIs</InputLabel>
+              <FormControl fullWidth sx={{ mb: 2 }}>
+                <InputLabel id="connections-label">Selecione conexões de bancos</InputLabel>
                 <Select
                   labelId="connections-label"
                   multiple
-                  value={connections}
-                  label="Selecione conexões e APIs"
-                  onChange={(event) => setConnections(event.target.value as string[])}
+                  value={selectedConnections}
+                  label="Selecione conexões de bancos"
+                  onChange={(event) => setSelectedConnections(event.target.value as number[])}
                   renderValue={(selected) => (
                     <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
-                      {(selected as string[]).map((value) => (
-                        <Chip key={value} label={value} />
-                      ))}
+                      {(selected as number[]).map((value) => {
+                        const connection = connections.find((item) => item.id === value);
+                        return <Chip key={value} label={connection?.name ?? value} />;
+                      })}
                     </Box>
                   )}
                 >
-                  {connectionOptions.map((option) => (
-                    <MenuItem key={option} value={option}>
-                      <ListItemText primary={option} />
+                  {connections.map((option) => (
+                    <MenuItem key={option.id} value={option.id}>
+                      <ListItemText primary={option.name} secondary={`${option.host}:${option.port}`} />
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+
+              <FormControl fullWidth>
+                <InputLabel id="api-label">Selecione APIs cadastradas</InputLabel>
+                <Select
+                  labelId="api-label"
+                  multiple
+                  value={selectedApiRoutes}
+                  label="Selecione APIs cadastradas"
+                  onChange={(event) => setSelectedApiRoutes(event.target.value as number[])}
+                  renderValue={(selected) => (
+                    <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
+                      {(selected as number[]).map((value) => {
+                        const route = apiRoutes.find((item) => item.id === value);
+                        return <Chip key={value} label={route?.name ?? value} />;
+                      })}
+                    </Box>
+                  )}
+                >
+                  {apiRoutes.map((route) => (
+                    <MenuItem key={route.id} value={route.id}>
+                      <ListItemText primary={route.name} secondary={`${route.method} ${route.path}`} />
                     </MenuItem>
                   ))}
                 </Select>
@@ -252,15 +277,28 @@ const AgentConfigPage = () => {
                 </li>
               ))}
             </Box>
-            <Typography variant="subtitle2">Fontes selecionadas</Typography>
-            <Box component="ul" sx={{ pl: 2, mb: 3 }}>
+            <Typography variant="subtitle2">Conexões selecionadas</Typography>
+            <Box component="ul" sx={{ pl: 2, mb: 2 }}>
               {summary.connections.map((source) => (
                 <li key={source}>
                   <Typography variant="body2">{source}</Typography>
                 </li>
               ))}
             </Box>
-            <Button variant="contained" fullWidth>
+            <Typography variant="subtitle2">APIs selecionadas</Typography>
+            <Box component="ul" sx={{ pl: 2, mb: 3 }}>
+              {summary.apiRoutes.map((source) => (
+                <li key={source}>
+                  <Typography variant="body2">{source}</Typography>
+                </li>
+              ))}
+            </Box>
+            <Button
+              variant="contained"
+              fullWidth
+              onClick={handleSaveAgent}
+              disabled={createAgent.isPending || isSaveDisabled}
+            >
               Salvar agente
             </Button>
           </CardContent>

@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import settings
-from app.api import connections, scans, tables, api_routes, rag
+from app.api import connections, scans, tables, api_routes, rag, agents
 
 app = FastAPI(title="AtlasRAG API", version="0.1.0")
 
@@ -164,6 +164,7 @@ app.include_router(scans.router)
 app.include_router(tables.router)
 app.include_router(api_routes.router)
 app.include_router(rag.router)
+app.include_router(agents.router)
 
 
 @app.get("/health")
