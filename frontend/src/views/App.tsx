@@ -6,6 +6,8 @@ import ScansPage from "./pages/ScansPage";
 import TablesPage from "./pages/TablesPage";
 import ApiRoutesPage from "./pages/ApiRoutesPage";
 import RagPlaygroundPage from "./pages/RagPlaygroundPage";
+import AgentConfigPage from "./pages/AgentConfigPage";
+import AgentChatPage from "./pages/AgentChatPage";
 
 const App = () => {
   return (
@@ -18,6 +20,8 @@ const App = () => {
           <Route path="/tables" element={<TablesPage />} />
           <Route path="/api-routes" element={<ApiRoutesPage />} />
           <Route path="/rag" element={<RagPlaygroundPage />} />
+          <Route path="/agents" element={<AgentConfigPage />} />
+          <Route path="/agent-chat" element={<AgentChatPage />} />
         </Routes>
       </Box>
     </Box>

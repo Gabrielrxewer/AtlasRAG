@@ -36,12 +36,15 @@ const ConnectionsPage = () => {
   return (
     <Box>
       <Typography variant="h4" sx={{ mb: 2 }}>
-        Conexões Postgres
+        Conexões externas
+      </Typography>
+      <Typography variant="body1" sx={{ mb: 3 }}>
+        Cadastre conexões com bancos externos para que os agentes possam consultar dados fora da base principal.
       </Typography>
       <Card sx={{ mb: 3 }}>
         <CardContent>
           <Typography variant="h6" sx={{ mb: 2 }}>
-            Nova conexão
+            Cadastrar conexão externa
           </Typography>
           <form onSubmit={handleSubmit(onSubmit)}>
             <Grid container spacing={2}>

@@ -6,7 +6,9 @@ const navItems = [
   { label: "Scans", path: "/scans" },
   { label: "Tabelas & Colunas", path: "/tables" },
   { label: "API Routes", path: "/api-routes" },
-  { label: "RAG Playground", path: "/rag" }
+  { label: "RAG Playground", path: "/rag" },
+  { label: "Configurar Agente", path: "/agents" },
+  { label: "Chat com Agentes", path: "/agent-chat" }
 ];
 
 const drawerWidth = 240;
