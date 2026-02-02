@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     planner_retry_limit: int = 2
     schema_context_tables_limit: int = 80
     schema_context_columns_limit: int = 40
+    schema_context_sample_rows_limit: int = 5
     schema_context_constraints_limit: int = 200
     schema_context_indexes_limit: int = 200
     environment: str = "development"

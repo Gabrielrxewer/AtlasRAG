@@ -111,7 +111,9 @@ def send_agent_message(agent_id: int, payload: AgentMessageCreate, db: Session =
     db.flush()
 
     try:
-        reply, citations, executed_selects, tool_payload = build_agent_reply(db, agent, payload.content)
+        reply, citations, executed_selects, tool_payload = build_agent_reply(
+            db, agent, payload.content, user_message.id
+        )
     except RuntimeError as exc:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
