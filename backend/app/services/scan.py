@@ -185,7 +185,15 @@ def _coerce_sample_value(value: Any, *, scan_id: int, schema_name: str, table_na
 
 def _configure_client_encoding(conn, scan_id: int) -> None:
     try:
-        conn.execute(text("SET client_encoding TO 'UTF8'"))
+        server_encoding = conn.execute(text("SHOW server_encoding")).scalar_one_or_none()
+        target_encoding = server_encoding or "UTF8"
+        if not re.fullmatch(r"[A-Za-z0-9_]+", target_encoding):
+            logger.warning(
+                "scan_client_encoding_invalid",
+                extra={"scan_id": scan_id, "server_encoding": server_encoding},
+            )
+            return
+        conn.exec_driver_sql(f"SET client_encoding TO '{target_encoding}'")
     except Exception:
         logger.warning("scan_client_encoding_set_failed", extra={"scan_id": scan_id}, exc_info=True)
 
