@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select, delete, tuple_
 
 from app.config import settings
-from app.models import DbTable, DbColumn, ApiRoute, Embedding
+from app.models import DbTable, DbColumn, ApiRoute, Embedding, Scan, DbSchema
 from app.services.selects import build_suggested_selects
 
 
@@ -173,6 +173,49 @@ def reindex_embeddings(db: Session, scan_id: int | None, include_api_routes: boo
     return len(to_index)
 
 
+def _latest_scan_ids(db: Session, connection_ids: set[int]) -> set[int]:
+    if not connection_ids:
+        return set()
+    scans = (
+        db.query(Scan)
+        .filter(Scan.connection_id.in_(connection_ids), Scan.status == "completed")
+        .order_by(Scan.connection_id, Scan.finished_at.desc().nullslast(), Scan.started_at.desc())
+        .all()
+    )
+    latest: dict[int, int] = {}
+    for scan in scans:
+        if scan.connection_id not in latest:
+            latest[scan.connection_id] = scan.id
+    return set(latest.values())
+
+
+def _resolve_table_meta(db: Session, table_ids: set[int]) -> dict[int, dict[str, Any]]:
+    if not table_ids:
+        return {}
+    rows = (
+        db.query(DbTable.id, DbSchema.scan_id, Scan.connection_id)
+        .join(DbTable.schema)
+        .join(DbSchema.scan)
+        .filter(DbTable.id.in_(table_ids))
+        .all()
+    )
+    return {row.id: {"scan_id": row.scan_id, "connection_id": row.connection_id} for row in rows}
+
+
+def _resolve_column_meta(db: Session, column_ids: set[int]) -> dict[int, dict[str, Any]]:
+    if not column_ids:
+        return {}
+    rows = (
+        db.query(DbColumn.id, DbSchema.scan_id, Scan.connection_id)
+        .join(DbColumn.table)
+        .join(DbTable.schema)
+        .join(DbSchema.scan)
+        .filter(DbColumn.id.in_(column_ids))
+        .all()
+    )
+    return {row.id: {"scan_id": row.scan_id, "connection_id": row.connection_id} for row in rows}
+
+
 def search_embeddings(db: Session, question: str, top_k: int, scope: dict[str, Any] | None = None) -> list[Embedding]:
     vector = embed_texts([question])[0]
     distance = Embedding.embedding.cosine_distance(vector)
@@ -190,12 +233,28 @@ def search_embeddings(db: Session, question: str, top_k: int, scope: dict[str, A
     if scope:
         connection_ids = set(scope.get("connection_ids") or [])
         api_route_ids = set(scope.get("api_route_ids") or [])
+        latest_scan_ids = _latest_scan_ids(db, connection_ids)
+        fallback_table_ids: set[int] = set()
+        fallback_column_ids: set[int] = set()
+        for item in filtered:
+            if item.item_type == "table" and not (item.meta or {}).get("connection_id"):
+                fallback_table_ids.add(item.item_id)
+            elif item.item_type == "column" and not (item.meta or {}).get("connection_id"):
+                fallback_column_ids.add(item.item_id)
+        fallback_table_meta = _resolve_table_meta(db, fallback_table_ids)
+        fallback_column_meta = _resolve_column_meta(db, fallback_column_ids)
         if connection_ids or api_route_ids:
             scoped: list[Embedding] = []
             for item in filtered:
                 if item.item_type in {"table", "column"} and connection_ids:
-                    connection_id = (item.meta or {}).get("connection_id")
-                    if connection_id in connection_ids:
+                    meta = item.meta or {}
+                    if item.item_type == "table":
+                        meta = {**fallback_table_meta.get(item.item_id, {}), **meta}
+                    else:
+                        meta = {**fallback_column_meta.get(item.item_id, {}), **meta}
+                    connection_id = meta.get("connection_id")
+                    scan_id = meta.get("scan_id")
+                    if connection_id in connection_ids and (not latest_scan_ids or scan_id in latest_scan_ids):
                         scoped.append(item)
                 elif item.item_type == "api_route" and api_route_ids:
                     if item.item_id in api_route_ids:
@@ -207,6 +266,20 @@ def search_embeddings(db: Session, question: str, top_k: int, scope: dict[str, A
 def ask_rag(db: Session, question: str, scope: dict[str, Any] | None = None) -> dict[str, Any]:
     matches = search_embeddings(db, question.strip(), settings.rag_top_k, scope=scope)
     if not matches:
+        if scope and scope.get("connection_ids"):
+            latest_scan_ids = _latest_scan_ids(db, set(scope.get("connection_ids") or []))
+            if not latest_scan_ids:
+                return {
+                    "answer": "Nenhum scan concluído foi encontrado para as conexões selecionadas.",
+                    "citations": [],
+                }
+            return {
+                "answer": (
+                    "O último scan das conexões selecionadas ainda não foi indexado no RAG. "
+                    "Reindexe o catálogo para atualizar o contexto."
+                ),
+                "citations": [],
+            }
         return {"answer": "Contexto insuficiente para responder com segurança.", "citations": []}
     context = [match.meta for match in matches]
     instructions = (
