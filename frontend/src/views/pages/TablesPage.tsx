@@ -1,9 +1,110 @@
-import { Box, Card, CardContent, Divider, Grid, MenuItem, Stack, TextField, Typography } from "@mui/material";
+import {
+  Box,
+  Card,
+  CardContent,
+  Divider,
+  Grid,
+  MenuItem,
+  Stack,
+  TextField,
+  Typography
+} from "@mui/material";
 import { useCallback, useRef, useState } from "react";
 import { useConnections } from "../../controllers/useConnections";
 import { useScans, useSchema } from "../../controllers/useScans";
 import { useUpdateColumnAnnotations, useUpdateTableAnnotations } from "../../controllers/useAnnotations";
+import { useSamples } from "../../controllers/useSamples";
+import SamplesViewer from "../components/SamplesViewer";
 import TagEditor from "../components/TagEditor";
+import { TableSchema } from "../../models/types";
+
+type TableCardProps = {
+  table: TableSchema;
+  tableTags: Record<number, string[]>;
+  columnTags: Record<number, string[]>;
+  scheduleTableUpdate: (tableId: number, tags: string[], baseAnnotations?: Record<string, unknown>) => void;
+  scheduleColumnUpdate: (columnId: number, tags: string[], baseAnnotations?: Record<string, unknown>) => void;
+};
+
+const TableCard = ({
+  table,
+  tableTags,
+  columnTags,
+  scheduleTableUpdate,
+  scheduleColumnUpdate
+}: TableCardProps) => {
+  const { data: samples = [] } = useSamples(table.id);
+
+  return (
+    <Card>
+      <CardContent>
+        <Typography variant="h6">
+          {table.schema}.{table.name}
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          {table.description || "Sem descrição"}
+        </Typography>
+        <TagEditor
+          value={tableTags[table.id] || (table.annotations?.tags as string[]) || []}
+          onChange={(tags) =>
+            scheduleTableUpdate(table.id, tags, (table.annotations as Record<string, unknown>) || {})
+          }
+        />
+        <Divider sx={{ my: 2 }} />
+        <Typography variant="subtitle2" sx={{ mb: 1 }}>
+          Selects sugeridos
+        </Typography>
+        {table.suggested_selects.length ? (
+          <Box component="ul" sx={{ pl: 3, mb: 2 }}>
+            {table.suggested_selects.map((select) => (
+              <li key={select}>
+                <Typography variant="body2" sx={{ fontFamily: "monospace" }}>
+                  {select}
+                </Typography>
+              </li>
+            ))}
+          </Box>
+        ) : (
+          <Typography variant="body2" sx={{ mb: 2 }}>
+            Nenhum select sugerido.
+          </Typography>
+        )}
+        <Typography variant="subtitle2" sx={{ mb: 1 }}>
+          Amostras de dados
+        </Typography>
+        <SamplesViewer samples={samples} />
+        <Divider sx={{ my: 2 }} />
+        <Typography variant="subtitle2" sx={{ mb: 1 }}>
+          Colunas
+        </Typography>
+        <Grid container spacing={2}>
+          {table.columns.map((column) => (
+            <Grid item xs={12} md={6} key={column.id}>
+              <Card sx={{ backgroundColor: "rgba(248, 250, 252, 0.9)" }}>
+                <CardContent>
+                  <Typography variant="subtitle1">{column.name}</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {column.data_type}
+                  </Typography>
+                  <TagEditor
+                    value={columnTags[column.id] || (column.annotations?.tags as string[]) || []}
+                    onChange={(tags) =>
+                      scheduleColumnUpdate(
+                        column.id,
+                        tags,
+                        (column.annotations as Record<string, unknown>) || {}
+                      )
+                    }
+                  />
+                </CardContent>
+              </Card>
+            </Grid>
+          ))}
+        </Grid>
+      </CardContent>
+    </Card>
+  );
+};
 
 const TablesPage = () => {
   const { data: connections } = useConnections();
@@ -97,50 +198,13 @@ const TablesPage = () => {
       <Grid container spacing={2}>
         {schema?.map((table) => (
           <Grid item xs={12} key={table.id}>
-            <Card>
-              <CardContent>
-                <Typography variant="h6">
-                  {table.schema}.{table.name}
-                </Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                  {table.description || "Sem descrição"}
-                </Typography>
-                <TagEditor
-                  value={tableTags[table.id] || (table.annotations?.tags as string[]) || []}
-                  onChange={(tags) =>
-                    scheduleTableUpdate(table.id, tags, (table.annotations as Record<string, unknown>) || {})
-                  }
-                />
-                <Divider sx={{ my: 2 }} />
-                <Typography variant="subtitle2" sx={{ mb: 1 }}>
-                  Colunas
-                </Typography>
-                <Grid container spacing={2}>
-                  {table.columns.map((column) => (
-                    <Grid item xs={12} md={6} key={column.id}>
-                      <Card sx={{ backgroundColor: "rgba(248, 250, 252, 0.9)" }}>
-                        <CardContent>
-                          <Typography variant="subtitle1">{column.name}</Typography>
-                          <Typography variant="body2" color="text.secondary">
-                            {column.data_type}
-                          </Typography>
-                          <TagEditor
-                            value={columnTags[column.id] || (column.annotations?.tags as string[]) || []}
-                            onChange={(tags) =>
-                              scheduleColumnUpdate(
-                                column.id,
-                                tags,
-                                (column.annotations as Record<string, unknown>) || {}
-                              )
-                            }
-                          />
-                        </CardContent>
-                      </Card>
-                    </Grid>
-                  ))}
-                </Grid>
-              </CardContent>
-            </Card>
+            <TableCard
+              table={table}
+              tableTags={tableTags}
+              columnTags={columnTags}
+              scheduleTableUpdate={scheduleTableUpdate}
+              scheduleColumnUpdate={scheduleColumnUpdate}
+            />
           </Grid>
         ))}
       </Grid>

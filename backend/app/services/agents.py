@@ -61,7 +61,12 @@ def build_agent_reply(db: Session, agent: Agent, user_message: str) -> tuple[str
     citations: list[dict[str, Any]] = []
     context: list[dict[str, Any]] = []
     if agent.enable_rag:
-        matches = search_embeddings(db, user_message.strip(), settings.rag_top_k)
+        matches = search_embeddings(
+            db,
+            user_message.strip(),
+            settings.rag_top_k,
+            scope={"connection_ids": agent.connection_ids, "api_route_ids": agent.api_route_ids},
+        )
         filtered_matches = []
         for match in matches:
             if not agent.allow_db and match.item_type in {"table", "column"}:

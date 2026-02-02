@@ -38,6 +38,7 @@ export type TableSchema = {
   description?: string | null;
   annotations?: Record<string, unknown> | null;
   columns: Column[];
+  suggested_selects: string[];
 };
 
 export type Sample = {

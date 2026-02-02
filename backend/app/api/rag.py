@@ -33,6 +33,7 @@ def ask(payload: RagAskIn, db: Session = Depends(get_db)):
     question = payload.question.strip()
     if len(question) < 3:
         raise HTTPException(status_code=400, detail="Question is required")
-    response = ask_rag(db, question)
+    scope = payload.scope.model_dump() if payload.scope else None
+    response = ask_rag(db, question, scope=scope)
     logger.info("rag_ask_completed", extra={"question_length": len(question)})
     return RagAskOut(**response)

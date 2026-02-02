@@ -52,7 +52,15 @@ def get_scan_schema(scan_id: int, db: Session = Depends(get_db)):
                 suggested_selects=build_suggested_selects(
                     table.schema.name,
                     table.name,
-                    [column.name for column in table.columns],
+                    [
+                        {
+                            "name": column.name,
+                            "tags": (column.annotations or {}).get("tags"),
+                        }
+                        for column in table.columns
+                    ],
+                    table_annotations=table.annotations,
+                    sample_rows=table.samples[0].rows if table.samples else None,
                 ),
             )
         )

@@ -76,8 +76,8 @@ export const deleteApiRoute = async (id: number) => {
   return data;
 };
 
-export const askRag = async (question: string): Promise<RagAnswer> => {
-  const { data } = await api.post("/rag/ask", { question });
+export const askRag = async (payload: { question: string; scope?: Record<string, unknown> }): Promise<RagAnswer> => {
+  const { data } = await api.post("/rag/ask", payload);
   return data;
 };
 
