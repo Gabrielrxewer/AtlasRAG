@@ -1,4 +1,4 @@
-import { Box, Card, CardContent, Grid, MenuItem, TextField, Typography } from "@mui/material";
+import { Box, Card, CardContent, Grid, MenuItem, Stack, TextField, Typography } from "@mui/material";
 import { useState } from "react";
 import { useConnections } from "../../controllers/useConnections";
 import { useScans } from "../../controllers/useScans";
@@ -9,16 +9,21 @@ const ScansPage = () => {
   const { data: scans } = useScans(connectionId);
 
   return (
-    <Box>
-      <Typography variant="h4" sx={{ mb: 2 }}>
-        Snapshots de Scan
-      </Typography>
+    <Stack spacing={3}>
+      <Box>
+        <Typography variant="h3" sx={{ mb: 1 }}>
+          Snapshots de Scan
+        </Typography>
+        <Typography variant="subtitle1" color="text.secondary">
+          Acompanhe o status dos scans por conexão e valide o catálogo gerado.
+        </Typography>
+      </Box>
       <TextField
         select
         label="Conexão"
         value={connectionId ?? ""}
         onChange={(event) => setConnectionId(Number(event.target.value))}
-        sx={{ mb: 3, minWidth: 240 }}
+        sx={{ maxWidth: 320 }}
       >
         {connections?.map((connection) => (
           <MenuItem key={connection.id} value={connection.id}>
@@ -30,7 +35,7 @@ const ScansPage = () => {
       <Grid container spacing={2}>
         {scans?.map((scan) => (
           <Grid item xs={12} md={6} key={scan.id}>
-            <Card>
+            <Card sx={{ height: "100%" }}>
               <CardContent>
                 <Typography variant="h6">Scan #{scan.id}</Typography>
                 <Typography variant="body2" color="text.secondary">
@@ -55,11 +60,11 @@ const ScansPage = () => {
         ))}
       </Grid>
       {scans && scans.length === 0 && (
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+        <Typography variant="body2" color="text.secondary">
           Nenhum scan encontrado para esta conexão.
         </Typography>
       )}
-    </Box>
+    </Stack>
   );
 };
 

@@ -1,4 +1,4 @@
-import { Box, Card, CardContent, Divider, Grid, MenuItem, TextField, Typography } from "@mui/material";
+import { Box, Card, CardContent, Divider, Grid, MenuItem, Stack, TextField, Typography } from "@mui/material";
 import { useCallback, useRef, useState } from "react";
 import { useConnections } from "../../controllers/useConnections";
 import { useScans, useSchema } from "../../controllers/useScans";
@@ -53,11 +53,16 @@ const TablesPage = () => {
   );
 
   return (
-    <Box>
-      <Typography variant="h4" sx={{ mb: 2 }}>
-        Tabelas & Colunas
-      </Typography>
-      <Box sx={{ display: "flex", gap: 2, mb: 3 }}>
+    <Stack spacing={3}>
+      <Box>
+        <Typography variant="h3" sx={{ mb: 1 }}>
+          Tabelas & Colunas
+        </Typography>
+        <Typography variant="subtitle1" color="text.secondary">
+          Encontre descrições, tags e metadados para enriquecer o catálogo dos agentes.
+        </Typography>
+      </Box>
+      <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
         <TextField
           select
           label="Conexão"
@@ -87,14 +92,16 @@ const TablesPage = () => {
             </MenuItem>
           ))}
         </TextField>
-      </Box>
+      </Stack>
 
       <Grid container spacing={2}>
         {schema?.map((table) => (
           <Grid item xs={12} key={table.id}>
             <Card>
               <CardContent>
-                <Typography variant="h6">{table.schema}.{table.name}</Typography>
+                <Typography variant="h6">
+                  {table.schema}.{table.name}
+                </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
                   {table.description || "Sem descrição"}
                 </Typography>
@@ -111,7 +118,7 @@ const TablesPage = () => {
                 <Grid container spacing={2}>
                   {table.columns.map((column) => (
                     <Grid item xs={12} md={6} key={column.id}>
-                      <Card variant="outlined">
+                      <Card sx={{ backgroundColor: "rgba(248, 250, 252, 0.9)" }}>
                         <CardContent>
                           <Typography variant="subtitle1">{column.name}</Typography>
                           <Typography variant="body2" color="text.secondary">
@@ -137,7 +144,7 @@ const TablesPage = () => {
           </Grid>
         ))}
       </Grid>
-    </Box>
+    </Stack>
   );
 };
 
