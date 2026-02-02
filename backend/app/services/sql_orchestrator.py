@@ -5,12 +5,12 @@ import logging
 import re
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 import httpx
-from sqlalchemy import select, text
-from sqlalchemy.engine import URL, create_engine
+from sqlalchemy import text
+from sqlalchemy.engine import URL, create_engine, Engine
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, ValidationError
 
@@ -28,22 +28,35 @@ FORBIDDEN_FUNCTIONS = re.compile(
     r"\b(pg_read_file|pg_ls_dir|pg_sleep|dblink|lo_export|lo_import)\b",
     re.IGNORECASE,
 )
+SELECT_INTO_PATTERN = re.compile(
+    r"\bselect\b[\s\S]+?\binto\b",
+    re.IGNORECASE,
+)
 FROM_JOIN_PATTERN = re.compile(
     r"\b(from|join)\s+([a-zA-Z0-9_\".]+)",
     re.IGNORECASE,
 )
+
+ENGINE_CACHE: dict[int, Engine] = {}
 
 
 class PlannerQuery(BaseModel):
     name: str
     purpose: str
     sql: str
+    connection_id: int | None = None
     expected_shape: dict[str, Any] | None = None
     safety: dict[str, Any] | None = None
 
 
 class PlannerResponse(BaseModel):
-    decision: str
+    decision: Literal[
+        "run_selects",
+        "use_predefined",
+        "no_sql_needed",
+        "need_clarification",
+        "refuse",
+    ]
     reason: str
     entities: list[str] = []
     queries: list[PlannerQuery] = []
@@ -75,6 +88,15 @@ class PredefinedQuery:
     required_params: list[str]
 
 
+class ExecutedQuery(BaseModel):
+    name: str
+    sql: str
+    rows_returned: int
+    truncated: bool
+    elapsed_ms: int
+    connection_id: int
+
+
 def predefined_queries_catalog() -> list[PredefinedQuery]:
     return []
 
@@ -101,7 +123,9 @@ def _connection_info(connection: Connection) -> dict[str, Any]:
     }
 
 
-def _build_engine(info: dict[str, Any]):
+def _build_engine(connection_id: int, info: dict[str, Any]) -> Engine:
+    if connection_id in ENGINE_CACHE:
+        return ENGINE_CACHE[connection_id]
     url = URL.create(
         "postgresql+psycopg2",
         username=info["username"],
@@ -111,7 +135,9 @@ def _build_engine(info: dict[str, Any]):
         database=info["database"],
         query={"sslmode": info["ssl_mode"]},
     )
-    return create_engine(url, pool_pre_ping=True)
+    engine = create_engine(url, pool_pre_ping=True)
+    ENGINE_CACHE[connection_id] = engine
+    return engine
 
 
 def _normalize_identifier(value: str) -> str:
@@ -144,6 +170,8 @@ def _validate_sql(sql: str, allowed_tables: set[str], max_rows: int) -> tuple[bo
         return False, "Apenas SELECT/CTE são permitidos.", cleaned
     if FORBIDDEN_KEYWORDS.search(lowered):
         return False, "Comandos de escrita ou DDL não são permitidos.", cleaned
+    if SELECT_INTO_PATTERN.search(lowered):
+        return False, "SELECT INTO não é permitido.", cleaned
     if FORBIDDEN_FUNCTIONS.search(lowered):
         return False, "Funções perigosas não são permitidas.", cleaned
     referenced = _extract_table_names(cleaned)
@@ -207,6 +235,7 @@ def _schema_context(db: Session, connection_ids: list[int]) -> tuple[dict[str, A
                 "annotations": column.annotations,
             }
         )
+    table_name_map: dict[int, dict[str, str]] = {}
     allowed_tables: set[str] = set()
     for table in tables:
         schema_name = _normalize_identifier(table.schema.name)
@@ -214,9 +243,13 @@ def _schema_context(db: Session, connection_ids: list[int]) -> tuple[dict[str, A
         if schema_name and table_name:
             allowed_tables.add(f"{schema_name}.{table_name}")
             allowed_tables.add(table_name)
+        table_name_map[table.id] = {"schema": table.schema.name, "name": table.name}
 
     table_payload = []
     for table in tables[: settings.schema_context_tables_limit]:
+        sample_rows = []
+        if table.samples:
+            sample_rows = (table.samples[0].rows or [])[: settings.schema_context_sample_rows_limit]
         table_payload.append(
             {
                 "schema": table.schema.name,
@@ -225,13 +258,15 @@ def _schema_context(db: Session, connection_ids: list[int]) -> tuple[dict[str, A
                 "description": table.description,
                 "annotations": table.annotations,
                 "columns": (column_map.get(table.id, []))[: settings.schema_context_columns_limit],
+                "sample_rows": sample_rows,
             }
         )
     return {
         "tables": table_payload,
         "constraints": [
             {
-                "table_id": constraint.table_id,
+                "schema": table_name_map.get(constraint.table_id, {}).get("schema"),
+                "table": table_name_map.get(constraint.table_id, {}).get("name"),
                 "name": constraint.name,
                 "type": constraint.constraint_type,
                 "definition": constraint.definition,
@@ -239,7 +274,12 @@ def _schema_context(db: Session, connection_ids: list[int]) -> tuple[dict[str, A
             for constraint in constraints[: settings.schema_context_constraints_limit]
         ],
         "indexes": [
-            {"table_id": index.table_id, "name": index.name, "definition": index.definition}
+            {
+                "schema": table_name_map.get(index.table_id, {}).get("schema"),
+                "table": table_name_map.get(index.table_id, {}).get("name"),
+                "name": index.name,
+                "definition": index.definition,
+            }
             for index in indexes[: settings.schema_context_indexes_limit]
         ],
     }, allowed_tables
@@ -249,7 +289,8 @@ def _planner_prompt(payload: dict[str, Any]) -> list[dict[str, str]]:
     instructions = (
         "Você é o Planner SQL-RAG.\n"
         "Sua função é decidir se precisa consultar o banco e, se sim, propor 1..N SELECTs seguros e pequenos.\n"
-        "Você DEVE responder somente com JSON válido conforme o schema do contrato."
+        "Você DEVE responder somente com JSON válido conforme o schema do contrato.\n"
+        "Se houver múltiplas conexões, você pode definir connection_id em cada query."
     )
     return [
         {"role": "system", "content": instructions},
@@ -283,8 +324,12 @@ def _call_llm(model: str, messages: list[dict[str, str]]) -> str:
 
 
 def _parse_json_response(raw: str) -> dict[str, Any]:
+    cleaned = raw.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.strip("`")
+        cleaned = cleaned.replace("json", "", 1).strip()
     try:
-        return json.loads(raw)
+        return json.loads(cleaned)
     except json.JSONDecodeError as exc:
         raise ValueError("Resposta JSON inválida do LLM.") from exc
 
@@ -296,6 +341,7 @@ def _planner_request_payload(
     db_dialect: str,
     conversation_context: list[dict[str, Any]],
     error: dict[str, Any] | None,
+    connection_ids: list[int],
 ) -> dict[str, Any]:
     return {
         "user_question": user_question,
@@ -309,6 +355,7 @@ def _planner_request_payload(
         },
         "conversation_context": conversation_context,
         "sql_error": error,
+        "available_connection_ids": connection_ids,
     }
 
 
@@ -331,16 +378,23 @@ def orchestrate_sql_rag(
     user_question: str,
     connection_ids: list[int],
     conversation_context: list[dict[str, Any]],
-) -> tuple[str, list[dict[str, Any]]]:
+) -> tuple[str, list[dict[str, Any]], str]:
     if not settings.openai_api_key:
         raise RuntimeError("OPENAI_API_KEY is required")
+    if settings.db_dialect != "postgres":
+        logger.warning(
+            "sql_orchestrator_unsupported_dialect",
+            extra={"db_dialect": settings.db_dialect},
+        )
+        return "Dialeto de banco ainda não suportado para execução segura.", [], ""
 
     request_id = str(uuid4())
     schema_context, allowed_tables = _schema_context(db, connection_ids)
     predefined = predefined_queries_catalog()
     error_payload: dict[str, Any] | None = None
     sql_results: list[dict[str, Any]] = []
-    used_sql: list[dict[str, Any]] = []
+    executed_queries: list[ExecutedQuery] = []
+    tool_payload = ""
 
     for attempt in range(settings.planner_retry_limit + 1):
         planner_payload = _planner_request_payload(
@@ -350,6 +404,7 @@ def orchestrate_sql_rag(
             settings.db_dialect,
             conversation_context,
             error_payload,
+            connection_ids,
         )
         planner_raw = _call_llm(settings.planner_model, _planner_prompt(planner_payload))
         try:
@@ -389,14 +444,14 @@ def orchestrate_sql_rag(
                     "responder_invalid_response",
                     extra={"request_id": request_id, "error": str(exc), "response": responder_raw[:2000]},
                 )
-                return "Não foi possível formatar a resposta final. Pode tentar novamente?", []
-            return responder.answer, [item.model_dump() for item in responder.used_sql]
+                return "Não foi possível formatar a resposta final. Pode tentar novamente?", [], ""
+            return responder.answer, [item.model_dump() for item in executed_queries], ""
 
         if planner_response.decision == "need_clarification":
-            return planner_response.clarifying_question or "Pode fornecer mais detalhes?", []
+            return planner_response.clarifying_question or "Pode fornecer mais detalhes?", [], ""
 
         if planner_response.decision == "refuse":
-            return planner_response.reason, []
+            return planner_response.reason, [], ""
 
         queries_to_run: list[PlannerQuery] = []
         if planner_response.decision == "use_predefined" and planner_response.predefined_query_id:
@@ -416,7 +471,7 @@ def orchestrate_sql_rag(
             queries_to_run = planner_response.queries[: settings.sql_max_queries]
 
         if not queries_to_run:
-            return "Não foi possível identificar uma consulta segura para executar.", []
+            return "Não foi possível identificar uma consulta segura para executar.", [], ""
 
         sql_results = []
         error_payload = None
@@ -431,7 +486,15 @@ def orchestrate_sql_rag(
                     }
                 }
                 break
-            connection_id = connection_ids[0] if connection_ids else None
+            connection_id = query.connection_id or (connection_ids[0] if connection_ids else None)
+            if connection_id and connection_id not in connection_ids:
+                error_payload = {
+                    "sql_error": {
+                        "query_name": query.name,
+                        "message": "Conexão não permitida para esta consulta.",
+                    }
+                }
+                break
             if not connection_id:
                 error_payload = {
                     "sql_error": {
@@ -450,10 +513,11 @@ def orchestrate_sql_rag(
                 }
                 break
             info = _connection_info(connection)
-            engine = _build_engine(info)
+            engine = _build_engine(connection_id, info)
             rows: list[dict[str, Any]] = []
             columns: list[str] = []
             error_message = None
+            query_start = time.monotonic()
             try:
                 with engine.connect() as conn:
                     if settings.db_dialect == "postgres":
@@ -482,7 +546,16 @@ def orchestrate_sql_rag(
                     "truncated": len(rows) >= settings.sql_max_rows,
                 }
             )
-            used_sql.append({"name": query.name, "sql": safe_sql, "rows_returned": len(rows)})
+            executed_queries.append(
+                ExecutedQuery(
+                    name=query.name,
+                    sql=safe_sql,
+                    rows_returned=len(rows),
+                    truncated=len(rows) >= settings.sql_max_rows,
+                    elapsed_ms=int((time.monotonic() - query_start) * 1000),
+                    connection_id=connection_id,
+                )
+            )
 
         elapsed_ms = int((time.monotonic() - start) * 1000)
         logger.info(
@@ -498,7 +571,7 @@ def orchestrate_sql_rag(
         if error_payload:
             if attempt < settings.planner_retry_limit:
                 continue
-            return "Não foi possível executar as consultas solicitadas. Pode ajustar a pergunta?", []
+            return "Não foi possível executar as consultas solicitadas. Pode ajustar a pergunta?", [], ""
 
         responder_payload = _responder_request_payload(
             user_question, schema_context, sql_results, settings.db_dialect
@@ -512,7 +585,19 @@ def orchestrate_sql_rag(
                 "responder_invalid_response",
                 extra={"request_id": request_id, "error": str(exc), "response": responder_raw[:2000]},
             )
-            return "Não foi possível formatar a resposta final. Pode tentar novamente?", []
-        return responder.answer, [item.model_dump() for item in responder.used_sql]
+            return "Não foi possível formatar a resposta final. Pode tentar novamente?", [], ""
+        tool_payload = json.dumps(
+            {
+                "request_id": request_id,
+                "sql_results": [
+                    {**item, "rows": item["rows"][: settings.schema_context_sample_rows_limit]}
+                    for item in sql_results
+                ],
+                "executed_queries": [item.model_dump() for item in executed_queries],
+            },
+            ensure_ascii=False,
+            default=str,
+        )
+        return responder.answer, [item.model_dump() for item in executed_queries], tool_payload
 
-    return "Não foi possível concluir a resposta.", []
+    return "Não foi possível concluir a resposta.", [], ""

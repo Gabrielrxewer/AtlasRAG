@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -17,6 +18,26 @@ def _format_connections(connections: list[Connection]) -> list[str]:
 
 def _format_routes(routes: list[ApiRoute]) -> list[str]:
     return [f"{route.method} {route.base_url}{route.path}" for route in routes]
+
+
+def _openai_headers() -> dict[str, str]:
+    return {
+        "Authorization": f"Bearer {settings.openai_api_key}",
+        "Content-Type": "application/json",
+    }
+
+
+def _call_llm(model: str, messages: list[dict[str, str]]) -> str:
+    payload = {"model": model, "messages": messages, "temperature": 0.2}
+    with httpx.Client(timeout=60) as client:
+        response = client.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers=_openai_headers(),
+            json=payload,
+        )
+        response.raise_for_status()
+        data = response.json()
+    return data["choices"][0]["message"]["content"]
 
 
 def _build_system_prompt(
@@ -48,7 +69,7 @@ def _build_system_prompt(
 
 
 def build_agent_reply(
-    db: Session, agent: Agent, user_message: str
+    db: Session, agent: Agent, user_message: str, user_message_id: int | None = None
 ) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]], str | None]:
     if not settings.openai_api_key:
         raise RuntimeError("OPENAI_API_KEY is required")
@@ -80,10 +101,11 @@ def build_agent_reply(
         citations = [{"item_type": match.item_type, "item_id": match.item_id} for match in filtered_matches]
 
     system_prompt = _build_system_prompt(agent, connections, routes, context)
+    history_query = db.query(AgentMessage).filter(AgentMessage.agent_id == agent.id)
+    if user_message_id is not None:
+        history_query = history_query.filter(AgentMessage.id != user_message_id)
     history = (
-        db.query(AgentMessage)
-        .filter(AgentMessage.agent_id == agent.id)
-        .order_by(AgentMessage.id.desc())
+        history_query.order_by(AgentMessage.id.desc())
         .limit(settings.agent_history_limit)
         .all()
     )
@@ -95,15 +117,15 @@ def build_agent_reply(
             history_messages.append({"role": "assistant", "content": f"RESULTADO_SELECT: {msg.content}"})
         else:
             history_messages.append({"role": msg.role, "content": msg.content})
-    messages = [{"role": "system", "content": system_prompt}, *history_messages, {"role": "user", "content": user_message}]
-
     if agent.allow_db and agent.connection_ids:
-        answer, used_sql = orchestrate_sql_rag(
+        answer, used_sql, tool_payload = orchestrate_sql_rag(
             db,
             user_message,
             agent.connection_ids,
             history_messages,
         )
-        return answer, citations, used_sql, None
+        return answer, citations, used_sql, tool_payload or None
 
-    return "Não há conexões disponíveis para consulta.", citations, [], None
+    messages = [{"role": "system", "content": system_prompt}, *history_messages, {"role": "user", "content": user_message}]
+    answer = _call_llm(agent.model, messages)
+    return answer, citations, [], None
