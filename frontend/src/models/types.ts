@@ -16,6 +16,7 @@ export type Scan = {
   status: string;
   started_at: string;
   finished_at?: string | null;
+  error_message?: string | null;
 };
 
 export type Column = {

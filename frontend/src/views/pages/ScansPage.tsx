@@ -39,11 +39,26 @@ const ScansPage = () => {
                 <Typography variant="body2" color="text.secondary">
                   Iniciado: {new Date(scan.started_at).toLocaleString()}
                 </Typography>
+                {scan.finished_at && (
+                  <Typography variant="body2" color="text.secondary">
+                    Finalizado: {new Date(scan.finished_at).toLocaleString()}
+                  </Typography>
+                )}
+                {scan.status === "failed" && scan.error_message && (
+                  <Typography variant="body2" color="error" sx={{ mt: 1 }}>
+                    Erro: {scan.error_message}
+                  </Typography>
+                )}
               </CardContent>
             </Card>
           </Grid>
         ))}
       </Grid>
+      {scans && scans.length === 0 && (
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+          Nenhum scan encontrado para esta conexão.
+        </Typography>
+      )}
     </Box>
   );
 };
