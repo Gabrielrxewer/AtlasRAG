@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.services.scan import reconcile_scan_status
 from app.services import sql_orchestrator
+from app.services.scan import build_sample_query
 
 
 @dataclass
@@ -89,3 +90,10 @@ def test_select_latest_scan_ids_prefers_completed_and_running_with_catalog():
     assert latest[12] == 4
     assert latest[13] == 5
     assert running == {5}
+
+
+def test_build_sample_query_accepts_quoted_names():
+    query = build_sample_query('Sales-Data', 'Order Items', ['Line ID'])
+    assert query is not None
+    assert 'FROM "Sales-Data"."Order Items"' in query
+    assert 'ORDER BY "Line ID"' in query

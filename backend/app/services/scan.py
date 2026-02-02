@@ -345,22 +345,21 @@ def is_safe_identifier(value: str) -> bool:
     return bool(IDENTIFIER_RE.match(value))
 
 
-def build_sample_query(schema_name: str, table_name: str, pk_columns: list[str]) -> str | None:
-    if not (is_safe_identifier(schema_name) and is_safe_identifier(table_name)):
-        return None
-    for column in pk_columns:
-        if not is_safe_identifier(column):
-            return None
+def _quote_identifier(value: str) -> str:
+    escaped = value.replace('"', '""')
+    return f'"{escaped}"'
 
-    def q(ident: str) -> str:
-        return f'"{ident}"'
+
+def build_sample_query(schema_name: str, table_name: str, pk_columns: list[str]) -> str | None:
+    if not schema_name or not table_name:
+        return None
 
     order_by = ""
     if pk_columns:
-        pk_list = ", ".join(q(c) for c in pk_columns)
+        pk_list = ", ".join(_quote_identifier(c) for c in pk_columns)
         order_by = f" ORDER BY {pk_list}"
 
-    return f"SELECT * FROM {q(schema_name)}.{q(table_name)}{order_by} LIMIT :limit"
+    return f"SELECT * FROM {_quote_identifier(schema_name)}.{_quote_identifier(table_name)}{order_by} LIMIT :limit"
 
 
 def _coerce_text(value: Any) -> Any:
