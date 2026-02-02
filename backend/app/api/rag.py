@@ -36,13 +36,16 @@ def ask(payload: RagAskIn, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Question is required")
     scope = payload.scope.model_dump() if payload.scope else None
     if scope and scope.get("connection_ids"):
-        answer, executed, _tool_payload = orchestrate_sql_rag(
-            db,
-            question,
-            scope["connection_ids"],
-            [],
-            "Você é o assistente do Playground de dados. Responda com base nos dados consultados.",
-        )
+        try:
+            answer, executed, _tool_payload = orchestrate_sql_rag(
+                db,
+                question,
+                scope["connection_ids"],
+                [],
+                "Você é o assistente do Playground de dados. Responda com base nos dados consultados.",
+            )
+        except RuntimeError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         logger.info("rag_ask_completed", extra={"question_length": len(question), "mode": "sql"})
         return RagAskOut(answer=answer, citations=[], selects=executed)
     response = ask_rag(db, question, scope=scope)
