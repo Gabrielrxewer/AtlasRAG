@@ -1,4 +1,4 @@
-import { Box, Button, Card, CardContent, Grid, TextField, Typography } from "@mui/material";
+import { Box, Button, Card, CardContent, Grid, Stack, TextField, Typography } from "@mui/material";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -34,15 +34,17 @@ const ConnectionsPage = () => {
   };
 
   return (
-    <Box>
-      <Typography variant="h4" sx={{ mb: 2 }}>
-        Conexões externas
-      </Typography>
-      <Typography variant="body1" sx={{ mb: 3 }}>
-        Cadastre conexões com bancos externos para que os agentes possam consultar dados fora da base principal.
-        O banco padrão do aplicativo fica separado e é usado apenas para armazenar o catálogo e as conexões.
-      </Typography>
-      <Card sx={{ mb: 3 }}>
+    <Stack spacing={3}>
+      <Box>
+        <Typography variant="h3" sx={{ mb: 1 }}>
+          Conexões externas
+        </Typography>
+        <Typography variant="subtitle1" color="text.secondary">
+          Cadastre conexões com bancos externos para que os agentes possam consultar dados fora da base principal.
+          O banco padrão do aplicativo fica separado e é usado apenas para armazenar o catálogo e as conexões.
+        </Typography>
+      </Box>
+      <Card sx={{ background: "linear-gradient(135deg, rgba(37, 99, 235, 0.08), rgba(99, 102, 241, 0.04))" }}>
         <CardContent>
           <Typography variant="h6" sx={{ mb: 2 }}>
             Cadastrar conexão externa
@@ -83,24 +85,17 @@ const ConnectionsPage = () => {
       <Grid container spacing={2}>
         {data?.map((connection) => (
           <Grid item xs={12} md={6} key={connection.id}>
-            <Card>
+            <Card sx={{ height: "100%" }}>
               <CardContent>
                 <Typography variant="h6">{connection.name}</Typography>
                 <Typography variant="body2" color="text.secondary">
                   {connection.host}:{connection.port}/{connection.database}
                 </Typography>
-                <Box sx={{ display: "flex", gap: 1, mt: 2 }}>
-                  <Button
-                    variant="outlined"
-                    onClick={() => scanMutation.mutate(connection.id)}
-                  >
+                <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, mt: 2 }}>
+                  <Button variant="contained" onClick={() => scanMutation.mutate(connection.id)}>
                     Scan
                   </Button>
-                  <Button
-                    variant="outlined"
-                    color="error"
-                    onClick={() => deleteMutation.mutate(connection.id)}
-                  >
+                  <Button variant="outlined" color="error" onClick={() => deleteMutation.mutate(connection.id)}>
                     Remover
                   </Button>
                 </Box>
@@ -109,7 +104,7 @@ const ConnectionsPage = () => {
           </Grid>
         ))}
       </Grid>
-    </Box>
+    </Stack>
   );
 };
 

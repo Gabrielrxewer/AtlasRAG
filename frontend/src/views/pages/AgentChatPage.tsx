@@ -60,14 +60,16 @@ const AgentChatPage = () => {
   };
 
   return (
-    <Box>
-      <Typography variant="h4" sx={{ mb: 2 }}>
-        Chat com agentes
-      </Typography>
-      <Typography variant="body1" sx={{ mb: 3 }}>
-        Escolha um agente cadastrado e inicie uma conversa. O agente usará o prompt base e as conexões
-        configuradas para responder.
-      </Typography>
+    <Stack spacing={3}>
+      <Box>
+        <Typography variant="h3" sx={{ mb: 1 }}>
+          Chat com agentes
+        </Typography>
+        <Typography variant="subtitle1" color="text.secondary">
+          Escolha um agente cadastrado e inicie uma conversa. O agente usará o prompt base e as conexões
+          configuradas para responder.
+        </Typography>
+      </Box>
 
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "280px 1fr" }, gap: 3 }}>
         <Card sx={{ height: "fit-content" }}>
@@ -79,11 +81,13 @@ const AgentChatPage = () => {
               {recentConversations.map((item) => (
                 <ListItem key={item.id} sx={{ px: 0 }}>
                   <Box sx={{ width: "100%" }}>
-                    <Stack direction="row" alignItems="center" spacing={1}>
-                      <Avatar sx={{ width: 32, height: 32 }}>{item.agent.slice(0, 1)}</Avatar>
-                      <Box sx={{ flexGrow: 1 }}>
+                    <Stack direction="row" alignItems="center" spacing={1.5}>
+                      <Avatar sx={{ width: 36, height: 36, bgcolor: "primary.main" }}>
+                        {item.agent.slice(0, 1)}
+                      </Avatar>
+                      <Box sx={{ flexGrow: 1, minWidth: 0 }}>
                         <Typography variant="subtitle2">{item.agent}</Typography>
-                        <Typography variant="body2" color="text.secondary">
+                        <Typography variant="body2" color="text.secondary" noWrap>
                           {item.preview}
                         </Typography>
                       </Box>
@@ -136,7 +140,9 @@ const AgentChatPage = () => {
                     {item.role === "user" ? "U" : "A"}
                   </Avatar>
                   <Box>
-                    <Typography variant="subtitle2">{item.role === "user" ? "Você" : activeAgent?.name}</Typography>
+                    <Typography variant="subtitle2">
+                      {item.role === "user" ? "Você" : activeAgent?.name}
+                    </Typography>
                     <Typography variant="body2">{item.content}</Typography>
                   </Box>
                 </Box>
@@ -165,7 +171,7 @@ const AgentChatPage = () => {
           </CardContent>
         </Card>
       </Box>
-    </Box>
+    </Stack>
   );
 };
 

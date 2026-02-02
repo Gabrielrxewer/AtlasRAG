@@ -1,4 +1,4 @@
-import { Box, Button, Card, CardContent, Grid, TextField, Typography } from "@mui/material";
+import { Box, Button, Card, CardContent, Grid, Stack, TextField, Typography } from "@mui/material";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -29,11 +29,16 @@ const ApiRoutesPage = () => {
   };
 
   return (
-    <Box>
-      <Typography variant="h4" sx={{ mb: 2 }}>
-        API Routes
-      </Typography>
-      <Card sx={{ mb: 3 }}>
+    <Stack spacing={3}>
+      <Box>
+        <Typography variant="h3" sx={{ mb: 1 }}>
+          API Routes
+        </Typography>
+        <Typography variant="subtitle1" color="text.secondary">
+          Centralize endpoints externos e controle quais agentes podem chamá-los.
+        </Typography>
+      </Box>
+      <Card sx={{ background: "linear-gradient(135deg, rgba(15, 118, 110, 0.1), rgba(45, 212, 191, 0.04))" }}>
         <CardContent>
           <Typography variant="h6" sx={{ mb: 2 }}>
             Nova rota
@@ -71,14 +76,15 @@ const ApiRoutesPage = () => {
       <Grid container spacing={2}>
         {data?.map((route) => (
           <Grid item xs={12} md={6} key={route.id}>
-            <Card>
+            <Card sx={{ height: "100%" }}>
               <CardContent>
                 <Typography variant="h6">{route.name}</Typography>
                 <Typography variant="body2" color="text.secondary">
-                  {route.method} {route.base_url}{route.path}
+                  {route.method} {route.base_url}
+                  {route.path}
                 </Typography>
                 <Typography variant="body2" sx={{ mt: 1 }}>
-                  {route.description}
+                  {route.description || "Sem descrição"}
                 </Typography>
                 <Button
                   sx={{ mt: 2 }}
@@ -93,7 +99,7 @@ const ApiRoutesPage = () => {
           </Grid>
         ))}
       </Grid>
-    </Box>
+    </Stack>
   );
 };
 

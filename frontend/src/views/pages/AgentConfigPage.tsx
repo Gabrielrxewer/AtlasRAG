@@ -12,6 +12,7 @@ import {
   ListItemText,
   MenuItem,
   Select,
+  Stack,
   Switch,
   TextField,
   Typography
@@ -89,17 +90,19 @@ const AgentConfigPage = () => {
   };
 
   return (
-    <Box>
-      <Typography variant="h4" sx={{ mb: 2 }}>
-        Configurar Agente
-      </Typography>
-      <Typography variant="body1" sx={{ mb: 3 }}>
-        Defina o papel do agente, o prompt base e as conexões externas que ele pode consultar para enriquecer
-        as respostas.
-      </Typography>
+    <Stack spacing={3}>
+      <Box>
+        <Typography variant="h3" sx={{ mb: 1 }}>
+          Configurar Agente
+        </Typography>
+        <Typography variant="subtitle1" color="text.secondary">
+          Defina o papel do agente, o prompt base e as conexões externas que ele pode consultar para enriquecer
+          as respostas.
+        </Typography>
+      </Box>
 
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "2fr 1fr" }, gap: 3 }}>
-        <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
+        <Stack spacing={3}>
           <Card>
             <CardContent>
               <Typography variant="h6" sx={{ mb: 2 }}>
@@ -143,7 +146,7 @@ const AgentConfigPage = () => {
               <Typography variant="h6" sx={{ mb: 2 }}>
                 Prompts
               </Typography>
-              <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              <Stack spacing={2}>
                 <TextField
                   label="Prompt base do agente"
                   value={basePrompt}
@@ -162,11 +165,11 @@ const AgentConfigPage = () => {
                   placeholder="Inclua instruções para usar conhecimento externo e histórico antes de responder."
                   fullWidth
                 />
-              </Box>
+              </Stack>
             </CardContent>
           </Card>
 
-          <Card>
+          <Card sx={{ background: "linear-gradient(135deg, rgba(37, 99, 235, 0.08), rgba(14, 165, 233, 0.04))" }}>
             <CardContent>
               <Typography variant="h6" sx={{ mb: 2 }}>
                 Fontes de dados e APIs
@@ -223,7 +226,7 @@ const AgentConfigPage = () => {
 
               <Divider sx={{ my: 3 }} />
 
-              <FormGroup row>
+              <FormGroup>
                 <FormControlLabel
                   control={
                     <Switch
@@ -246,65 +249,76 @@ const AgentConfigPage = () => {
               </FormGroup>
             </CardContent>
           </Card>
-        </Box>
+        </Stack>
 
-        <Card sx={{ height: "fit-content" }}>
+        <Card sx={{ height: "fit-content", position: "sticky", top: 120 }}>
           <CardContent>
             <Typography variant="h6" sx={{ mb: 2 }}>
               Resumo do agente
             </Typography>
-            <Typography variant="subtitle2">Nome</Typography>
-            <Typography variant="body2" sx={{ mb: 2 }}>
-              {agentName || "Defina um nome para o agente"}
-            </Typography>
-            <Typography variant="subtitle2">Template</Typography>
-            <Typography variant="body2" sx={{ mb: 2 }}>
-              {summary.template}
-            </Typography>
-            <Typography variant="subtitle2">Modelo GPT</Typography>
-            <Typography variant="body2" sx={{ mb: 2 }}>
-              {summary.model}
-            </Typography>
-            <Typography variant="subtitle2">Função</Typography>
-            <Typography variant="body2" sx={{ mb: 2 }}>
-              {agentRole || "Descreva a função principal"}
-            </Typography>
-            <Typography variant="subtitle2">Recursos habilitados</Typography>
-            <Box component="ul" sx={{ pl: 2, mb: 2 }}>
-              {summary.features.map((feature) => (
-                <li key={feature}>
-                  <Typography variant="body2">{feature}</Typography>
-                </li>
-              ))}
-            </Box>
-            <Typography variant="subtitle2">Conexões selecionadas</Typography>
-            <Box component="ul" sx={{ pl: 2, mb: 2 }}>
-              {summary.connections.map((source) => (
-                <li key={source}>
-                  <Typography variant="body2">{source}</Typography>
-                </li>
-              ))}
-            </Box>
-            <Typography variant="subtitle2">APIs selecionadas</Typography>
-            <Box component="ul" sx={{ pl: 2, mb: 3 }}>
-              {summary.apiRoutes.map((source) => (
-                <li key={source}>
-                  <Typography variant="body2">{source}</Typography>
-                </li>
-              ))}
-            </Box>
+            <Stack spacing={2}>
+              <Box>
+                <Typography variant="subtitle2">Nome</Typography>
+                <Typography variant="body2">
+                  {agentName || "Defina um nome para o agente"}
+                </Typography>
+              </Box>
+              <Box>
+                <Typography variant="subtitle2">Template</Typography>
+                <Typography variant="body2">{summary.template}</Typography>
+              </Box>
+              <Box>
+                <Typography variant="subtitle2">Modelo GPT</Typography>
+                <Typography variant="body2">{summary.model}</Typography>
+              </Box>
+              <Box>
+                <Typography variant="subtitle2">Função</Typography>
+                <Typography variant="body2">{agentRole || "Descreva a função principal"}</Typography>
+              </Box>
+              <Box>
+                <Typography variant="subtitle2">Recursos habilitados</Typography>
+                <Box component="ul" sx={{ pl: 2, mb: 0 }}>
+                  {summary.features.map((feature) => (
+                    <li key={feature}>
+                      <Typography variant="body2">{feature}</Typography>
+                    </li>
+                  ))}
+                </Box>
+              </Box>
+              <Box>
+                <Typography variant="subtitle2">Conexões selecionadas</Typography>
+                <Box component="ul" sx={{ pl: 2, mb: 0 }}>
+                  {summary.connections.map((source) => (
+                    <li key={source}>
+                      <Typography variant="body2">{source}</Typography>
+                    </li>
+                  ))}
+                </Box>
+              </Box>
+              <Box>
+                <Typography variant="subtitle2">APIs selecionadas</Typography>
+                <Box component="ul" sx={{ pl: 2, mb: 0 }}>
+                  {summary.apiRoutes.map((source) => (
+                    <li key={source}>
+                      <Typography variant="body2">{source}</Typography>
+                    </li>
+                  ))}
+                </Box>
+              </Box>
+            </Stack>
             <Button
               variant="contained"
               fullWidth
               onClick={handleSaveAgent}
               disabled={createAgent.isPending || isSaveDisabled}
+              sx={{ mt: 3 }}
             >
               Salvar agente
             </Button>
           </CardContent>
         </Card>
       </Box>
-    </Box>
+    </Stack>
   );
 };
 
