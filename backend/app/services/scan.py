@@ -3,7 +3,7 @@ import os
 import re
 import traceback
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any
 
 from sqlalchemy import text
@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.models import DbColumn, DbConstraint, DbIndex, DbSchema, DbTable, DbView, Sample, Scan
 
-logger = logging.getLogger("atlasrag")
+logger = logging.getLogger("atlasrag.scan")
 
 SCHEMA_QUERY = """
 SELECT schema_name
@@ -590,6 +590,63 @@ def _cleanup_existing_scan_data(db: Session, scan_id: int) -> None:
     )
     db.execute(text("DELETE FROM db_schemas WHERE scan_id = :scan_id"), {"scan_id": scan_id})
     db.commit()
+
+
+def _scan_catalog_counts(db: Session, scan_id: int) -> tuple[int, int]:
+    schema_count = db.execute(
+        text("SELECT COUNT(*) FROM db_schemas WHERE scan_id = :scan_id"),
+        {"scan_id": scan_id},
+    ).scalar_one()
+    table_count = db.execute(
+        text(
+            """
+            SELECT COUNT(*)
+            FROM db_tables t
+            JOIN db_schemas s ON s.id = t.schema_id
+            WHERE s.scan_id = :scan_id
+            """
+        ),
+        {"scan_id": scan_id},
+    ).scalar_one()
+    return int(schema_count or 0), int(table_count or 0)
+
+
+def reconcile_scan_status(
+    db: Session,
+    connection_ids: list[int] | None = None,
+    stale_minutes: int = 5,
+) -> None:
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=stale_minutes)
+    query = db.query(Scan).filter(Scan.status == "running")
+    if connection_ids:
+        query = query.filter(Scan.connection_id.in_(connection_ids))
+    scans = query.order_by(Scan.started_at.asc().nullslast()).all()
+    updated = False
+    for scan in scans:
+        if scan.started_at and scan.started_at > cutoff:
+            continue
+        schema_count, table_count = _scan_catalog_counts(db, scan.id)
+        if table_count > 0:
+            scan.status = "completed"
+            scan.finished_at = scan.finished_at or datetime.now(timezone.utc)
+            scan.error_message = None
+            logger.warning(
+                "scan_reconciled_completed",
+                extra={"scan_id": scan.id, "connection_id": scan.connection_id, "tables": table_count},
+            )
+            updated = True
+            continue
+        if schema_count == 0 and table_count == 0:
+            scan.status = "failed"
+            scan.finished_at = scan.finished_at or datetime.now(timezone.utc)
+            scan.error_message = "Scan interrompido/sem catálogo gerado"
+            logger.warning(
+                "scan_reconciled_failed",
+                extra={"scan_id": scan.id, "connection_id": scan.connection_id},
+            )
+            updated = True
+    if updated:
+        db.commit()
 
 
 def _run_scan_once(db: Session, info: ConnectionInfo, ctx: ScanContext, sample_limit: int) -> None:

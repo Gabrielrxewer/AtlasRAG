@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import time
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import Any, Literal
 from uuid import uuid4
@@ -17,6 +18,7 @@ from pydantic import BaseModel, ValidationError
 from app.config import settings
 from app.models import DbTable, DbColumn, DbConstraint, DbIndex, DbSchema, Scan, Connection
 from app.security import EncryptionError, decrypt_secret
+from app.services.scan import reconcile_scan_status
 
 logger = logging.getLogger("atlasrag.sql_orchestrator")
 
@@ -386,6 +388,44 @@ def _validate_sql(sql: str, allowed_tables: set[str], max_rows: int) -> tuple[bo
     return True, None, _ensure_limit(cleaned, max_rows)
 
 
+def _scan_has_catalog(db: Session, scan_id: int) -> bool:
+    result = db.execute(
+        text(
+            """
+            SELECT COUNT(*)
+            FROM db_tables t
+            JOIN db_schemas s ON s.id = t.schema_id
+            WHERE s.scan_id = :scan_id
+            """
+        ),
+        {"scan_id": scan_id},
+    ).scalar_one()
+    return int(result or 0) > 0
+
+
+def _select_latest_scan_ids(
+    db: Session, scans: list[Scan]
+) -> tuple[dict[int, int], set[int]]:
+    latest_scan_ids: dict[int, int] = {}
+    running_scan_ids: set[int] = set()
+    scans_by_connection: dict[int, list[Scan]] = {}
+    for scan in scans:
+        scans_by_connection.setdefault(scan.connection_id, []).append(scan)
+    for connection_id, items in scans_by_connection.items():
+        completed = next((scan for scan in items if scan.status == "completed"), None)
+        if completed:
+            latest_scan_ids[connection_id] = completed.id
+            continue
+        running = next(
+            (scan for scan in items if scan.status == "running" and _scan_has_catalog(db, scan.id)),
+            None,
+        )
+        if running:
+            latest_scan_ids[connection_id] = running.id
+            running_scan_ids.add(running.id)
+    return latest_scan_ids, running_scan_ids
+
+
 def _schema_context(
     db: Session, connection_ids: list[int]
 ) -> tuple[dict[str, Any], dict[int, set[str]]]:
@@ -393,14 +433,22 @@ def _schema_context(
         return {"connections": []}, {}
     scans = (
         db.query(Scan)
-        .filter(Scan.connection_id.in_(connection_ids), Scan.status == "completed")
+        .filter(Scan.connection_id.in_(connection_ids), Scan.status.in_(["completed", "running"]))
         .order_by(Scan.connection_id, Scan.finished_at.desc().nullslast(), Scan.started_at.desc())
         .all()
     )
-    latest_scan_ids: dict[int, int] = {}
-    for scan in scans:
-        if scan.connection_id not in latest_scan_ids:
-            latest_scan_ids[scan.connection_id] = scan.id
+    latest_scan_ids, running_scan_ids = _select_latest_scan_ids(db, scans)
+    if running_scan_ids:
+        for scan in scans:
+            if scan.id in running_scan_ids:
+                scan.status = "completed"
+                scan.finished_at = scan.finished_at or datetime.now(timezone.utc)
+                scan.error_message = None
+                logger.warning(
+                    "scan_status_auto_corrected",
+                    extra={"scan_id": scan.id, "connection_id": scan.connection_id},
+                )
+        db.commit()
     scan_ids = list(latest_scan_ids.values())
     if not scan_ids:
         return {"connections": []}, {}
@@ -733,6 +781,7 @@ def orchestrate_sql_rag(
         return "Dialeto de banco ainda não suportado para execução segura.", [], ""
 
     request_id = str(uuid4())
+    reconcile_scan_status(db, connection_ids)
     schema_context, allowed_tables_by_connection = _schema_context(db, connection_ids)
     connections_payload = schema_context.get("connections", [])
     has_any_table = any(connection.get("tables") for connection in connections_payload)
