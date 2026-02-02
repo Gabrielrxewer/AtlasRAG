@@ -36,10 +36,17 @@ def _run_migrations() -> None:
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
     request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+    origin = request.headers.get("origin")
+    headers = {"X-Request-ID": request_id}
+    if origin and (origin in cors_origins or "*" in cors_origins):
+        headers["Access-Control-Allow-Origin"] = origin
+        headers["Vary"] = "Origin"
+        if settings.cors_allow_credentials:
+            headers["Access-Control-Allow-Credentials"] = "true"
     return JSONResponse(
         status_code=exc.status_code,
         content={"detail": exc.detail, "request_id": request_id},
-        headers={"X-Request-ID": request_id},
+        headers=headers,
     )
 
 

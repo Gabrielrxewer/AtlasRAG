@@ -97,3 +97,44 @@ def test_build_sample_query_accepts_quoted_names():
     assert query is not None
     assert 'FROM "Sales-Data"."Order Items"' in query
     assert 'ORDER BY "Line ID"' in query
+
+
+def test_run_scan_finalize_sets_completed(monkeypatch):
+    from app.services import scan as scan_service
+
+    class DummyScan:
+        def __init__(self):
+            self.status = "running"
+            self.started_at = None
+            self.finished_at = None
+            self.error_message = None
+
+    class DummySession:
+        def __init__(self):
+            self.scan = DummyScan()
+            self.commits = 0
+
+        def get(self, _model, _scan_id):
+            return self.scan
+
+        def commit(self):
+            self.commits += 1
+
+        def rollback(self):
+            return None
+
+    db = DummySession()
+    monkeypatch.setattr(scan_service, "_run_scan_once", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(scan_service, "_scan_catalog_counts", lambda *_args, **_kwargs: (1, 2))
+
+    scan_service.run_scan(db, scan_service.ConnectionInfo(
+        host="localhost",
+        port=5432,
+        database="db",
+        username="user",
+        password="pass",
+        ssl_mode="prefer",
+    ), scan_id=1)
+
+    assert db.scan.status == "completed"
+    assert db.scan.finished_at is not None
