@@ -1,12 +1,15 @@
 import logging
 import time
 import uuid
+from pathlib import Path
 from collections import OrderedDict
 from threading import Lock
 from urllib.parse import urlparse
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from alembic import command
+from alembic.config import Config
 
 from app.config import settings
 from app.logging_config import configure_logging, request_id_var
@@ -17,6 +20,13 @@ configure_logging()
 app = FastAPI(title="AtlasRAG API", version="0.1.0")
 
 logger = logging.getLogger("atlasrag")
+
+
+def _run_migrations() -> None:
+    config_path = Path(__file__).resolve().parents[1] / "alembic.ini"
+    alembic_cfg = Config(str(config_path))
+    alembic_cfg.set_main_option("sqlalchemy.url", settings.database_url)
+    command.upgrade(alembic_cfg, "head")
 
 
 @app.exception_handler(HTTPException)
@@ -179,6 +189,12 @@ app.include_router(tables.router)
 app.include_router(api_routes.router)
 app.include_router(rag.router)
 app.include_router(agents.router)
+
+
+@app.on_event("startup")
+def run_migrations_on_startup() -> None:
+    logger.info("Running database migrations")
+    _run_migrations()
 
 
 @app.get("/health")
