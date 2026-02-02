@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     sql_max_rows: int = 200
     sql_timeout_ms: int = 5000
     planner_retry_limit: int = 2
+    sql_engine_cache_size: int = 16
     schema_context_tables_limit: int = 80
     schema_context_columns_limit: int = 40
     schema_context_sample_rows_limit: int = 5

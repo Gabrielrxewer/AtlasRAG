@@ -123,6 +123,7 @@ def build_agent_reply(
             user_message,
             agent.connection_ids,
             history_messages,
+            system_prompt,
         )
         return answer, citations, used_sql, tool_payload or None
 
