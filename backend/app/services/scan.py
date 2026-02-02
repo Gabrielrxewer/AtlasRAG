@@ -121,6 +121,122 @@ def _truncate_log_value(value: str, limit: int = 120) -> str:
     return f"{value[:limit]}…({len(value)} chars)"
 
 
+def _ensure_text_clause(query: str | Any):
+    if isinstance(query, str):
+        return text(query)
+    return query
+
+
+def _fetchall_with_encoding_fallback(
+    conn,
+    query: str | Any,
+    params: dict[str, Any] | None,
+    *,
+    scan_id: int,
+    context: str,
+) -> list[Any]:
+    query_clause = _ensure_text_clause(query)
+    try:
+        return conn.execute(query_clause, params or {}).fetchall()
+    except UnicodeDecodeError as exc:
+        logger.warning(
+            "scan_decode_error",
+            extra={
+                "scan_id": scan_id,
+                "context": context,
+                "error": str(exc),
+            },
+        )
+        for encoding in ("LATIN1", "CP1252"):
+            try:
+                conn.exec_driver_sql(f"SET client_encoding TO '{encoding}'")
+            except Exception:
+                logger.warning(
+                    "scan_client_encoding_set_failed",
+                    extra={"scan_id": scan_id, "encoding": encoding},
+                    exc_info=True,
+                )
+                continue
+            try:
+                rows = conn.execute(query_clause, params or {}).fetchall()
+            except UnicodeDecodeError:
+                logger.warning(
+                    "scan_decode_error_retry_failed",
+                    extra={
+                        "scan_id": scan_id,
+                        "context": context,
+                        "encoding": encoding,
+                    },
+                )
+                continue
+            logger.warning(
+                "scan_decode_error_retry_succeeded",
+                extra={
+                    "scan_id": scan_id,
+                    "context": context,
+                    "encoding": encoding,
+                },
+            )
+            return rows
+        raise
+
+
+def _fetch_rows_with_encoding_fallback(
+    conn,
+    query: str | Any,
+    params: dict[str, Any] | None,
+    *,
+    scan_id: int,
+    context: str,
+) -> tuple[list[str], list[Any]]:
+    query_clause = _ensure_text_clause(query)
+    try:
+        result = conn.execute(query_clause, params or {})
+        return list(result.keys()), result.fetchall()
+    except UnicodeDecodeError as exc:
+        logger.warning(
+            "scan_decode_error",
+            extra={
+                "scan_id": scan_id,
+                "context": context,
+                "error": str(exc),
+            },
+        )
+        for encoding in ("LATIN1", "CP1252"):
+            try:
+                conn.exec_driver_sql(f"SET client_encoding TO '{encoding}'")
+            except Exception:
+                logger.warning(
+                    "scan_client_encoding_set_failed",
+                    extra={"scan_id": scan_id, "encoding": encoding},
+                    exc_info=True,
+                )
+                continue
+            try:
+                result = conn.execute(query_clause, params or {})
+                rows = result.fetchall()
+            except UnicodeDecodeError:
+                logger.warning(
+                    "scan_decode_error_retry_failed",
+                    extra={
+                        "scan_id": scan_id,
+                        "context": context,
+                        "encoding": encoding,
+                    },
+                )
+                continue
+            logger.warning(
+                "scan_decode_error_retry_succeeded",
+                extra={
+                    "scan_id": scan_id,
+                    "context": context,
+                    "encoding": encoding,
+                },
+            )
+            return list(result.keys()), rows
+        raise
+
+
 def _coerce_text(
     value: Any,
     *,
@@ -250,7 +366,13 @@ def run_scan(db: Session, connection_info: ConnectionInfo, scan_id: int, sample_
         with client_engine.connect() as conn:
             _configure_client_encoding(conn, scan_id)
             _log_postgres_encodings(conn, scan_id)
-            schemas = conn.execute(text(SCHEMA_QUERY)).fetchall()
+            schemas = _fetchall_with_encoding_fallback(
+                conn,
+                SCHEMA_QUERY,
+                None,
+                scan_id=scan_id,
+                context="schemas",
+            )
             logger.info("scan_schemas_loaded", extra={"scan_id": scan_id, "schema_count": len(schemas)})
             for (schema_name,) in schemas:
                 schema_name = _coerce_text(
@@ -263,7 +385,13 @@ def run_scan(db: Session, connection_info: ConnectionInfo, scan_id: int, sample_
                 db.add(schema)
                 db.flush()
 
-                views = conn.execute(text(VIEW_QUERY), {"schema_name": schema_name}).fetchall()
+                views = _fetchall_with_encoding_fallback(
+                    conn,
+                    VIEW_QUERY,
+                    {"schema_name": schema_name},
+                    scan_id=scan_id,
+                    context="views",
+                )
                 logger.info(
                     "scan_views_loaded",
                     extra={"scan_id": scan_id, "schema_name": schema_name, "view_count": len(views)},
@@ -285,7 +413,13 @@ def run_scan(db: Session, connection_info: ConnectionInfo, scan_id: int, sample_
                     )
                     db.add(DbView(schema_id=schema.id, name=view_name, definition=definition))
 
-                tables = conn.execute(text(TABLE_QUERY), {"schema_name": schema_name}).fetchall()
+                tables = _fetchall_with_encoding_fallback(
+                    conn,
+                    TABLE_QUERY,
+                    {"schema_name": schema_name},
+                    scan_id=scan_id,
+                    context="tables",
+                )
                 logger.info(
                     "scan_tables_loaded",
                     extra={"scan_id": scan_id, "schema_name": schema_name, "table_count": len(tables)},
@@ -316,9 +450,13 @@ def run_scan(db: Session, connection_info: ConnectionInfo, scan_id: int, sample_
                     db.add(table)
                     db.flush()
 
-                    columns = conn.execute(
-                        text(COLUMN_QUERY), {"schema_name": table_schema, "table_name": table_name}
-                    ).fetchall()
+                    columns = _fetchall_with_encoding_fallback(
+                        conn,
+                        COLUMN_QUERY,
+                        {"schema_name": table_schema, "table_name": table_name},
+                        scan_id=scan_id,
+                        context="columns",
+                    )
                     logger.info(
                         "scan_columns_loaded",
                         extra={
@@ -371,9 +509,13 @@ def run_scan(db: Session, connection_info: ConnectionInfo, scan_id: int, sample_
                             )
                         )
 
-                    constraints = conn.execute(
-                        text(CONSTRAINT_QUERY), {"schema_name": table_schema, "table_name": table_name}
-                    ).fetchall()
+                    constraints = _fetchall_with_encoding_fallback(
+                        conn,
+                        CONSTRAINT_QUERY,
+                        {"schema_name": table_schema, "table_name": table_name},
+                        scan_id=scan_id,
+                        context="constraints",
+                    )
                     logger.info(
                         "scan_constraints_loaded",
                         extra={
@@ -417,9 +559,13 @@ def run_scan(db: Session, connection_info: ConnectionInfo, scan_id: int, sample_
                             )
                         )
 
-                    indexes = conn.execute(
-                        text(INDEX_QUERY), {"schema_name": table_schema, "table_name": table_name}
-                    ).fetchall()
+                    indexes = _fetchall_with_encoding_fallback(
+                        conn,
+                        INDEX_QUERY,
+                        {"schema_name": table_schema, "table_name": table_name},
+                        scan_id=scan_id,
+                        context="indexes",
+                    )
                     logger.info(
                         "scan_indexes_loaded",
                         extra={
@@ -480,6 +626,13 @@ def run_scan(db: Session, connection_info: ConnectionInfo, scan_id: int, sample_
 def _fetch_samples(
     conn, schema_name: str, table_name: str, sample_limit: int, *, scan_id: int
 ) -> list[dict[str, Any]]:
+    pk_rows = _fetchall_with_encoding_fallback(
+        conn,
+        PRIMARY_KEY_QUERY,
+        {"schema_name": schema_name, "table_name": table_name},
+        scan_id=scan_id,
+        context="primary_keys",
+    )
     pk_columns = [
         _coerce_text(
             row[0],
@@ -489,7 +642,7 @@ def _fetch_samples(
             schema_name=schema_name,
             table_name=table_name,
         )
-        for row in conn.execute(text(PRIMARY_KEY_QUERY), {"schema_name": schema_name, "table_name": table_name})
+        for row in pk_rows
     ]
     query_text = build_sample_query(schema_name, table_name, pk_columns)
     if not query_text:
@@ -500,10 +653,15 @@ def _fetch_samples(
         return []
     query = text(query_text)
     try:
-        result = conn.execute(query, {"limit": sample_limit})
-        columns = result.keys()
+        columns, fetched_rows = _fetch_rows_with_encoding_fallback(
+            conn,
+            query,
+            {"limit": sample_limit},
+            scan_id=scan_id,
+            context="samples",
+        )
         rows = []
-        for row in result.fetchall():
+        for row in fetched_rows:
             rows.append(
                 {
                     column_name: _coerce_sample_value(
