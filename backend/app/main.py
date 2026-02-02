@@ -1,4 +1,3 @@
-import logging
 import time
 import uuid
 from pathlib import Path
@@ -12,14 +11,19 @@ from alembic import command
 from alembic.config import Config
 
 from app.config import settings
-from app.logging_config import configure_logging, request_id_var
+from app.observability.logging import setup_logging, get_logger
+from app.observability.request_id import set_request_id, new_request_id, get_request_id
+from app.middlewares.http_logging import HttpLoggingMiddleware
+from app.middlewares.exception_handlers import unhandled_exception_handler
 from app.api import connections, scans, tables, api_routes, rag, agents
 
-configure_logging()
+setup_logging()
 
 app = FastAPI(title="AtlasRAG API", version="0.1.0")
+app.add_middleware(HttpLoggingMiddleware)
+app.add_exception_handler(Exception, unhandled_exception_handler)
 
-logger = logging.getLogger("atlasrag")
+logger = get_logger("atlasrag")
 
 
 def _run_migrations() -> None:
@@ -35,16 +39,6 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     return JSONResponse(
         status_code=exc.status_code,
         content={"detail": exc.detail, "request_id": request_id},
-        headers={"X-Request-ID": request_id},
-    )
-
-
-@app.exception_handler(Exception)
-async def unhandled_exception_handler(request: Request, exc: Exception):
-    request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
-    return JSONResponse(
-        status_code=500,
-        content={"detail": "Internal server error", "request_id": request_id},
         headers={"X-Request-ID": request_id},
     )
 
@@ -109,20 +103,10 @@ app.add_middleware(
 
 @app.middleware("http")
 async def request_context(request: Request, call_next):
-    request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+    request_id = request.headers.get("X-Request-ID", get_request_id() or new_request_id())
     request.state.request_id = request_id
-    token = request_id_var.set(request_id)
+    set_request_id(request_id)
     start = time.perf_counter()
-    logger.info(
-        "request_started",
-        extra={
-            "request_id": request_id,
-            "method": request.method,
-            "path": request.url.path,
-            "query": request.url.query,
-            "client_ip": request.client.host if request.client else "unknown",
-        },
-    )
 
     if request.url.path.endswith("/rag/ask"):
         forwarded_for = request.headers.get("X-Forwarded-For", "")
@@ -135,7 +119,6 @@ async def request_context(request: Request, call_next):
                 content={"detail": "Rate limit exceeded", "request_id": request_id},
             )
             response.headers["X-Request-ID"] = request_id
-            request_id_var.reset(token)
             return response
 
     try:
@@ -167,7 +150,7 @@ async def request_context(request: Request, call_next):
         response.headers["X-Request-ID"] = request_id
         return response
     finally:
-        request_id_var.reset(token)
+        set_request_id("")
 
 
 def _extract_client_ip(x_forwarded_for: str, fallback: str | None) -> str:
