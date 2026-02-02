@@ -74,6 +74,14 @@ def build_agent_reply(
     if not settings.openai_api_key:
         raise RuntimeError("OPENAI_API_KEY is required")
 
+    if agent.allow_db and not agent.connection_ids:
+        return (
+            "Este agente não tem conexões selecionadas. Selecione uma conexão no cadastro do agente.",
+            [],
+            [],
+            None,
+        )
+
     connections: list[Connection] = []
     routes: list[ApiRoute] = []
     if agent.connection_ids:
