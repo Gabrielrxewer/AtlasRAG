@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     app_encryption_key: str = ""
     rag_top_k: int = 5
     rag_min_score: float = 0.2
+    agent_history_limit: int = 12
+    agent_select_rounds: int = 3
+    agent_select_rows: int = 200
     environment: str = "development"
     rate_limit_per_minute: int = 30
     cors_origins: str = "http://localhost:5173"
