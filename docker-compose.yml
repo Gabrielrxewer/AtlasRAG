@@ -19,8 +19,10 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-}
       ENVIRONMENT: development
+      LOG_LEVEL: DEBUG
       CORS_ORIGINS: http://localhost:5173,http://localhost:4173
       CORS_ALLOW_CREDENTIALS: "false"
+      PYTHONUNBUFFERED: "1"
     depends_on:
       - app-db
     ports:
