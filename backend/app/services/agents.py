@@ -1,26 +1,14 @@
 from __future__ import annotations
 
 from typing import Any
-import json
-import re
 
-import httpx
-from sqlalchemy import select, text
-from sqlalchemy.engine import URL, create_engine
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import Agent, AgentMessage, Connection, ApiRoute
-from app.security import EncryptionError, decrypt_secret
-from app.services.scan import ConnectionInfo
 from app.services.rag import search_embeddings
-
-
-def _openai_headers() -> dict[str, str]:
-    return {
-        "Authorization": f"Bearer {settings.openai_api_key}",
-        "Content-Type": "application/json",
-    }
+from app.services.sql_orchestrator import orchestrate_sql_rag
 
 
 def _format_connections(connections: list[Connection]) -> list[str]:
@@ -29,41 +17,6 @@ def _format_connections(connections: list[Connection]) -> list[str]:
 
 def _format_routes(routes: list[ApiRoute]) -> list[str]:
     return [f"{route.method} {route.base_url}{route.path}" for route in routes]
-
-
-SELECT_FORBIDDEN_RE = re.compile(
-    r"\b(insert|update|delete|drop|alter|create|grant|revoke|truncate|call|execute|commit|rollback)\b",
-    re.IGNORECASE,
-)
-
-
-def _sanitize_query(query: str) -> str | None:
-    if not query:
-        return None
-    cleaned = query.strip()
-    if ";" in cleaned[:-1]:
-        return None
-    if cleaned.endswith(";"):
-        cleaned = cleaned[:-1].strip()
-    lowered = cleaned.lower()
-    if not (lowered.startswith("select") or lowered.startswith("with")):
-        return None
-    if SELECT_FORBIDDEN_RE.search(lowered):
-        return None
-    return cleaned
-
-
-def _build_client_engine(info: ConnectionInfo):
-    url = URL.create(
-        "postgresql+psycopg2",
-        username=info.username,
-        password=info.password,
-        host=info.host,
-        port=info.port,
-        database=info.database,
-        query={"sslmode": info.ssl_mode},
-    )
-    return create_engine(url, pool_pre_ping=True)
 
 
 def _build_system_prompt(
@@ -82,14 +35,7 @@ def _build_system_prompt(
         f"Conexões externas cadastradas: {_format_connections(connections) or ['nenhuma']}.",
         f"APIs cadastradas: {_format_routes(routes) or ['nenhuma']}.",
         f"Prompt base: {agent.base_prompt}",
-        "Se precisar de dados, você pode solicitar execução de SELECTs antes de responder.",
-        "Responda sempre em JSON válido com as chaves:",
-        "- action: 'final' ou 'select'",
-        "- content: resposta final quando action='final'",
-        "- selects: lista de objetos quando action='select', cada item com:",
-        "  - query: SQL SELECT (ou WITH ... SELECT), sem instruções de escrita.",
-        "  - connection_id: opcional se houver mais de uma conexão disponível.",
-        "Não sugira SQL em texto livre. Use action='select' para consultas.",
+        "Use o orquestrador SQL-RAG para decisões e respostas quando precisar consultar dados.",
     ]
     if agent.rag_prompt:
         lines.append(f"Prompt RAG: {agent.rag_prompt}")
@@ -99,123 +45,6 @@ def _build_system_prompt(
         else:
             lines.append("Contexto RAG: nenhum contexto relevante encontrado.")
     return "\n".join(lines)
-
-
-def _connection_info_from_model(connection: Connection) -> ConnectionInfo:
-    try:
-        password = decrypt_secret(connection.password_encrypted)
-    except EncryptionError as exc:
-        raise RuntimeError("Falha ao descriptografar a senha da conexão.") from exc
-    return ConnectionInfo(
-        host=connection.host,
-        port=connection.port,
-        database=connection.database,
-        username=connection.username,
-        password=password,
-        ssl_mode=connection.ssl_mode,
-    )
-
-
-def _execute_selects(
-    connection: Connection,
-    selects: list[str],
-    row_limit: int,
-) -> list[dict[str, Any]]:
-    info = _connection_info_from_model(connection)
-    engine = _build_client_engine(info)
-    results: list[dict[str, Any]] = []
-    for query in selects:
-        cleaned = _sanitize_query(query)
-        if not cleaned:
-            results.append(
-                {
-                    "connection_id": connection.id,
-                    "query": query,
-                    "error": "Query não permitida. Use apenas SELECT/CTE sem comandos de escrita.",
-                    "columns": [],
-                    "rows": [],
-                    "row_count": 0,
-                }
-            )
-            continue
-        wrapped = f"SELECT * FROM ({cleaned}) AS atlasrag_select LIMIT :limit"
-        try:
-            with engine.connect() as conn:
-                result = conn.execute(text(wrapped), {"limit": row_limit})
-                rows = [dict(row) for row in result.mappings().all()]
-                results.append(
-                    {
-                        "connection_id": connection.id,
-                        "query": cleaned,
-                        "columns": list(result.keys()),
-                        "rows": rows,
-                        "row_count": len(rows),
-                    }
-                )
-        except Exception as exc:
-            results.append(
-                {
-                    "connection_id": connection.id,
-                    "query": cleaned,
-                    "error": str(exc),
-                    "columns": [],
-                    "rows": [],
-                    "row_count": 0,
-                }
-            )
-    return results
-
-
-def _compact_result_payload(payload: list[dict[str, Any]], limit: int = 4000) -> str:
-    raw = json.dumps(payload, ensure_ascii=False, default=str)
-    if len(raw) <= limit:
-        return raw
-    return raw[:limit] + "..."
-
-
-def _parse_agent_action(content: str) -> dict[str, Any] | None:
-    try:
-        data = json.loads(content)
-    except json.JSONDecodeError:
-        data = None
-    if not isinstance(data, dict):
-        return None
-    return data
-
-
-def _extract_json_payload(content: str) -> dict[str, Any] | None:
-    parsed = _parse_agent_action(content)
-    if parsed:
-        return parsed
-    match = re.search(r"\{.*\}", content, re.DOTALL)
-    if not match:
-        return None
-    try:
-        data = json.loads(match.group(0))
-    except json.JSONDecodeError:
-        return None
-    if isinstance(data, dict):
-        return data
-    return None
-
-
-def _extract_selects_from_text(content: str) -> list[str]:
-    selects: list[str] = []
-    for match in re.findall(r"```sql(.*?)```", content, re.DOTALL | re.IGNORECASE):
-        candidate = match.strip()
-        if candidate:
-            selects.append(candidate)
-    if not selects and "select" in content.lower():
-        lines = [line.strip() for line in content.splitlines() if line.strip()]
-        for line in lines:
-            if line.lower().startswith("select") or line.lower().startswith("with"):
-                selects.append(line)
-    cleaned = []
-    for query in selects:
-        sanitized = _sanitize_query(query)
-        if sanitized:
-            cleaned.append(sanitized)
-    return cleaned
 
 
 def build_agent_reply(
@@ -268,83 +97,13 @@ def build_agent_reply(
             history_messages.append({"role": msg.role, "content": msg.content})
     messages = [{"role": "system", "content": system_prompt}, *history_messages, {"role": "user", "content": user_message}]
 
-    executed_selects: list[dict[str, Any]] = []
-    tool_payload: str | None = None
-    for _ in range(settings.agent_select_rounds):
-        payload = {
-            "model": agent.model,
-            "messages": messages,
-            "temperature": 0.2,
-        }
-        with httpx.Client(timeout=60) as client:
-            response = client.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers=_openai_headers(),
-                json=payload,
-            )
-            response.raise_for_status()
-            data = response.json()
+    if agent.allow_db and agent.connection_ids:
+        answer, used_sql = orchestrate_sql_rag(
+            db,
+            user_message,
+            agent.connection_ids,
+            history_messages,
+        )
+        return answer, citations, used_sql, None
 
-        reply_content = data["choices"][0]["message"]["content"]
-        action = _extract_json_payload(reply_content)
-        fallback_selects = _extract_selects_from_text(reply_content)
-        if not action:
-            if fallback_selects:
-                action = {"action": "select", "selects": [{"query": q} for q in fallback_selects]}
-            else:
-                return reply_content, citations, executed_selects, tool_payload
-
-        if action.get("action") == "final":
-            if fallback_selects:
-                action = {"action": "select", "selects": [{"query": q} for q in fallback_selects]}
-            else:
-                answer = action.get("content") if action.get("content") else reply_content
-                return answer, citations, executed_selects, tool_payload
-
-        if action.get("action") != "select":
-            return reply_content, citations, executed_selects, tool_payload
-
-        if not agent.allow_db:
-            return "O agente não tem permissão para executar consultas no banco.", citations, executed_selects, tool_payload
-        if not connections:
-            return "Nenhuma conexão disponível para executar selects.", citations, executed_selects, tool_payload
-
-        requested = action.get("selects") or []
-        if not isinstance(requested, list) or not requested:
-            return reply_content, citations, executed_selects, tool_payload
-
-        selects_by_connection: dict[int, list[str]] = {}
-        default_connection_id = connections[0].id if connections else None
-        for item in requested:
-            if not isinstance(item, dict):
-                continue
-            query = item.get("query")
-            if not query:
-                continue
-            connection_id = item.get("connection_id") or default_connection_id
-            if not connection_id:
-                continue
-            selects_by_connection.setdefault(int(connection_id), []).append(str(query))
-
-        if not selects_by_connection:
-            return reply_content, citations, executed_selects, tool_payload
-
-        for connection in connections:
-            if connection.id not in selects_by_connection:
-                continue
-            results = _execute_selects(
-                connection,
-                selects_by_connection[connection.id],
-                settings.agent_select_rows,
-            )
-            executed_selects.extend(results)
-
-        tool_payload = _compact_result_payload(executed_selects)
-        messages.append({"role": "assistant", "content": f"RESULTADO_SELECT: {tool_payload}"})
-
-    return (
-        "Contexto insuficiente após múltiplos selects. Vou responder com o que tenho.",
-        citations,
-        executed_selects,
-        tool_payload,
-    )
+    return "Não há conexões disponíveis para consulta.", citations, [], None
