@@ -1,10 +1,12 @@
+// Entrada principal da aplicação React.
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { CssBaseline, ThemeProvider, alpha, createTheme } from "@mui/material";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
-import App from "./views/App";
+import App from "./presentation/App";
 
+// Tema global da UI para consistência visual.
 const theme = createTheme({
   palette: {
     mode: "light",
@@ -147,6 +149,7 @@ const theme = createTheme({
   }
 });
 
+// Cliente global do React Query para cache de dados.
 const queryClient = new QueryClient();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(

@@ -1,11 +1,13 @@
+"""Testes de coerção de encoding em scans."""
 import logging
 
 import pytest
 
-from app.services.scan import _coerce_text
+from app.application.services.scan import _coerce_text
 
 
 def test_coerce_text_fallback_logs_warning(caplog):
+    # Garante decodificação resiliente.
     value = b"caf\xe9"
     with caplog.at_level(logging.WARNING, logger="atlasrag.scan"):
         decoded = _coerce_text(

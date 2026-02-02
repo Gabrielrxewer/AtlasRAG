@@ -1,15 +1,17 @@
+"""Testes de reconciliação de scans e helpers."""
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from app.services.scan import reconcile_scan_status
-from app.services import sql_orchestrator
-from app.services.scan import build_sample_query
+from app.application.services.scan import reconcile_scan_status
+from app.application.services import sql_orchestrator
+from app.application.services.scan import build_sample_query
 
 
 @dataclass
 class FakeScan:
+    """Scan fake para simular estados."""
     id: int
     connection_id: int
     status: str
@@ -19,6 +21,7 @@ class FakeScan:
 
 
 class FakeResult:
+    """Resultado fake para simular scalar_one."""
     def __init__(self, value: int):
         self._value = value
 
@@ -27,6 +30,7 @@ class FakeResult:
 
 
 class FakeQuery:
+    """Query fake para simular ORM."""
     def __init__(self, items):
         self._items = items
 
@@ -41,6 +45,7 @@ class FakeQuery:
 
 
 class FakeSession:
+    """Session fake para simular operações básicas."""
     def __init__(self, scans, counts):
         self._scans = scans
         self._counts = counts
@@ -58,6 +63,7 @@ class FakeSession:
 
 
 def test_reconcile_scan_status_marks_completed():
+    # Marca como completed quando há tabelas.
     started = datetime.now(timezone.utc) - timedelta(minutes=10)
     scans = [FakeScan(id=1, connection_id=10, status="running", started_at=started)]
     db = FakeSession(scans, counts={1: 3})
@@ -69,6 +75,7 @@ def test_reconcile_scan_status_marks_completed():
 
 
 def test_reconcile_scan_status_marks_failed():
+    # Marca como failed quando não há catálogo.
     started = datetime.now(timezone.utc) - timedelta(minutes=10)
     scans = [FakeScan(id=2, connection_id=11, status="running", started_at=started)]
     db = FakeSession(scans, counts={2: 0})
@@ -80,6 +87,7 @@ def test_reconcile_scan_status_marks_failed():
 
 
 def test_select_latest_scan_ids_prefers_completed_and_running_with_catalog():
+    # Prefere scan completed ou running com catálogo.
     scans = [
         FakeScan(id=3, connection_id=12, status="running"),
         FakeScan(id=4, connection_id=12, status="completed"),
@@ -93,6 +101,7 @@ def test_select_latest_scan_ids_prefers_completed_and_running_with_catalog():
 
 
 def test_build_sample_query_accepts_quoted_names():
+    # Aceita nomes com espaços/hífens usando aspas.
     query = build_sample_query('Sales-Data', 'Order Items', ['Line ID'])
     assert query is not None
     assert 'FROM "Sales-Data"."Order Items"' in query
@@ -100,7 +109,8 @@ def test_build_sample_query_accepts_quoted_names():
 
 
 def test_run_scan_finalize_sets_completed(monkeypatch):
-    from app.services import scan as scan_service
+    # Finaliza scan como completed se catalogo foi gerado.
+    from app.application.services import scan as scan_service
 
     class DummyScan:
         def __init__(self):
