@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.schemas import RagAskIn, RagAskOut, RagIndexIn
 from app.services.rag import reindex_embeddings, ask_rag
+from app.services.sql_orchestrator import orchestrate_sql_rag
 from app import models
 
 router = APIRouter(prefix="/rag", tags=["rag"])
@@ -34,6 +35,16 @@ def ask(payload: RagAskIn, db: Session = Depends(get_db)):
     if len(question) < 3:
         raise HTTPException(status_code=400, detail="Question is required")
     scope = payload.scope.model_dump() if payload.scope else None
+    if scope and scope.get("connection_ids"):
+        answer, executed, _tool_payload = orchestrate_sql_rag(
+            db,
+            question,
+            scope["connection_ids"],
+            [],
+            "Você é o assistente do Playground de dados. Responda com base nos dados consultados.",
+        )
+        logger.info("rag_ask_completed", extra={"question_length": len(question), "mode": "sql"})
+        return RagAskOut(answer=answer, citations=[], selects=executed)
     response = ask_rag(db, question, scope=scope)
-    logger.info("rag_ask_completed", extra={"question_length": len(question)})
-    return RagAskOut(**response)
+    logger.info("rag_ask_completed", extra={"question_length": len(question), "mode": "rag"})
+    return RagAskOut(**response, selects=[])

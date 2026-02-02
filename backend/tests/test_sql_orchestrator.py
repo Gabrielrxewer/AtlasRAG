@@ -42,6 +42,7 @@ def test_validate_sql_enforces_safety_and_limit():
 
 def test_orchestrate_sql_rag_smoke(monkeypatch):
     monkeypatch.setattr(settings, "openai_api_key", "test-key")
+    monkeypatch.setattr(sql_orchestrator, "reconcile_scan_status", lambda *_args, **_kwargs: None)
 
     def fake_schema_context(_db, _connection_ids):
         return (
@@ -133,6 +134,7 @@ def test_orchestrate_sql_rag_smoke(monkeypatch):
 
 def test_orchestrate_sql_rag_planner_invalid_fallback(monkeypatch):
     monkeypatch.setattr(settings, "openai_api_key", "test-key")
+    monkeypatch.setattr(sql_orchestrator, "reconcile_scan_status", lambda *_args, **_kwargs: None)
 
     def fake_schema_context(_db, _connection_ids):
         return (
@@ -249,6 +251,7 @@ class FakeResult:
 
 def test_orchestrate_sql_rag_without_catalog(monkeypatch):
     monkeypatch.setattr(settings, "openai_api_key", "test-key")
+    monkeypatch.setattr(sql_orchestrator, "reconcile_scan_status", lambda *_args, **_kwargs: None)
 
     def fake_schema_context(_db, _connection_ids):
         return (

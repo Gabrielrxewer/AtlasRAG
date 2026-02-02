@@ -149,6 +149,7 @@ class RagAskIn(BaseModel):
 class RagAskOut(BaseModel):
     answer: str
     citations: list[dict]
+    selects: list[dict] = Field(default_factory=list)
 
 
 class RagIndexIn(BaseModel):
