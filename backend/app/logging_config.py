@@ -66,3 +66,10 @@ def configure_logging() -> None:
         }
     )
     logging.captureWarnings(True)
+    atlas_logger = logging.getLogger("atlasrag")
+    atlas_logger.setLevel(level)
+    for name, logger in logging.root.manager.loggerDict.items():
+        if name.startswith("atlasrag.") and isinstance(logger, logging.Logger):
+            logger.setLevel(level)
+            logger.propagate = True
+    atlas_logger.info("logging_configured", extra={"log_level": level})
