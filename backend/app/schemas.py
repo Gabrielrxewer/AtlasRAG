@@ -211,3 +211,4 @@ class AgentMessageOut(BaseModel):
 class AgentChatResponse(BaseModel):
     message: AgentMessageOut
     citations: list[dict] = Field(default_factory=list)
+    selects: list[dict] = Field(default_factory=list)
