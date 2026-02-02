@@ -8,6 +8,7 @@ from sqlalchemy import select, delete, tuple_
 
 from app.config import settings
 from app.models import DbTable, DbColumn, ApiRoute, Embedding
+from app.services.selects import build_suggested_selects
 
 
 def _hash_content(value: str) -> str:
@@ -23,6 +24,11 @@ def _openai_headers() -> dict[str, str]:
 
 def build_table_document(table: DbTable) -> dict[str, Any]:
     annotations = table.annotations or {}
+    suggested_selects = build_suggested_selects(
+        table.schema.name,
+        table.name,
+        [column.name for column in table.columns],
+    )
     content = {
         "type": "table",
         "id": table.id,
@@ -30,6 +36,7 @@ def build_table_document(table: DbTable) -> dict[str, Any]:
         "name": table.name,
         "description": table.description or "",
         "annotations": annotations,
+        "suggested_selects": suggested_selects,
     }
     return {"content": content, "text": _stringify_content(content)}
 

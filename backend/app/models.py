@@ -46,6 +46,7 @@ class Scan(Base):
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="running")
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    error_message: Mapped[str | None] = mapped_column(Text)
 
     connection: Mapped[Connection] = relationship(back_populates="scans")
     schemas: Mapped[list["DbSchema"]] = relationship(back_populates="scan", cascade="all, delete-orphan")

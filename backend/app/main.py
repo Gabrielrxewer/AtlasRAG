@@ -9,7 +9,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import settings
+from app.logging_config import configure_logging, request_id_var
 from app.api import connections, scans, tables, api_routes, rag, agents
+
+configure_logging()
 
 app = FastAPI(title="AtlasRAG API", version="0.1.0")
 
@@ -98,6 +101,7 @@ app.add_middleware(
 async def request_context(request: Request, call_next):
     request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
     request.state.request_id = request_id
+    token = request_id_var.set(request_id)
     start = time.perf_counter()
 
     if request.url.path.endswith("/rag/ask"):
@@ -111,6 +115,7 @@ async def request_context(request: Request, call_next):
                 content={"detail": "Rate limit exceeded", "request_id": request_id},
             )
             response.headers["X-Request-ID"] = request_id
+            request_id_var.reset(token)
             return response
 
     try:
@@ -130,10 +135,19 @@ async def request_context(request: Request, call_next):
             },
         )
         raise
-    duration_ms = (time.perf_counter() - start) * 1000
-    _log_request(request, request_id, request.client.host if request.client else None, response.status_code, duration_ms)
-    response.headers["X-Request-ID"] = request_id
-    return response
+    else:
+        duration_ms = (time.perf_counter() - start) * 1000
+        _log_request(
+            request,
+            request_id,
+            request.client.host if request.client else None,
+            response.status_code,
+            duration_ms,
+        )
+        response.headers["X-Request-ID"] = request_id
+        return response
+    finally:
+        request_id_var.reset(token)
 
 
 def _extract_client_ip(x_forwarded_for: str, fallback: str | None) -> str:
