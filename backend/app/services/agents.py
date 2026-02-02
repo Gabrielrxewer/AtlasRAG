@@ -176,10 +176,45 @@ def _parse_agent_action(content: str) -> dict[str, Any] | None:
     try:
         data = json.loads(content)
     except json.JSONDecodeError:
-        return None
+        data = None
     if not isinstance(data, dict):
         return None
     return data
+
+
+def _extract_json_payload(content: str) -> dict[str, Any] | None:
+    parsed = _parse_agent_action(content)
+    if parsed:
+        return parsed
+    match = re.search(r"\{.*\}", content, re.DOTALL)
+    if not match:
+        return None
+    try:
+        data = json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return None
+    if isinstance(data, dict):
+        return data
+    return None
+
+
+def _extract_selects_from_text(content: str) -> list[str]:
+    selects: list[str] = []
+    for match in re.findall(r"```sql(.*?)```", content, re.DOTALL | re.IGNORECASE):
+        candidate = match.strip()
+        if candidate:
+            selects.append(candidate)
+    if not selects and "select" in content.lower():
+        lines = [line.strip() for line in content.splitlines() if line.strip()]
+        for line in lines:
+            if line.lower().startswith("select") or line.lower().startswith("with"):
+                selects.append(line)
+    cleaned = []
+    for query in selects:
+        sanitized = _sanitize_query(query)
+        if sanitized:
+            cleaned.append(sanitized)
+    return cleaned
 
 
 def build_agent_reply(
@@ -250,9 +285,16 @@ def build_agent_reply(
             data = response.json()
 
         reply_content = data["choices"][0]["message"]["content"]
-        action = _parse_agent_action(reply_content)
-        if not action or action.get("action") == "final":
-            answer = action.get("content") if action and action.get("content") else reply_content
+        action = _extract_json_payload(reply_content)
+        if not action:
+            fallback_selects = _extract_selects_from_text(reply_content)
+            if fallback_selects:
+                action = {"action": "select", "selects": [{"query": q} for q in fallback_selects]}
+            else:
+                return reply_content, citations, executed_selects, tool_payload
+
+        if action.get("action") == "final":
+            answer = action.get("content") if action.get("content") else reply_content
             return answer, citations, executed_selects, tool_payload
 
         if action.get("action") != "select":
