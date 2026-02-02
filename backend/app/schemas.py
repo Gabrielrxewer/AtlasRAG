@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -52,7 +53,7 @@ class ScanOut(BaseModel):
 
 class SchemaTable(BaseModel):
     id: int
-    schema: str
+    schema_name: str = Field(validation_alias="schema", serialization_alias="schema")
     name: str
     table_type: str
     description: str | None
@@ -72,7 +73,7 @@ class ColumnOut(BaseModel):
 
 class TableSchemaOut(BaseModel):
     id: int
-    schema: str
+    schema_name: str = Field(validation_alias="schema", serialization_alias="schema")
     name: str
     table_type: str
     description: str | None

@@ -4,11 +4,11 @@ import time
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.db import get_db, SessionLocal
+from app.db import SessionLocal, get_db
 from app.models import Connection, Scan
-from app.schemas import ConnectionCreate, ConnectionUpdate, ConnectionOut, ScanOut
-from app.security import encrypt_secret, decrypt_secret, EncryptionError
-from app.services.scan import ConnectionInfo, run_scan, test_connection
+from app.schemas import ConnectionCreate, ConnectionOut, ConnectionUpdate, ScanOut
+from app.security import EncryptionError, decrypt_secret, encrypt_secret
+from app.services.scan import ConnectionInfo, run_scan, test_connection as test_connection_service
 
 router = APIRouter(prefix="/connections", tags=["connections"])
 logger = logging.getLogger("atlasrag.connections")
@@ -16,11 +16,15 @@ logger = logging.getLogger("atlasrag.connections")
 
 @router.post("", response_model=ConnectionOut)
 def create_connection(payload: ConnectionCreate, db: Session = Depends(get_db)):
-    logger.info("connection_create_requested", extra={"name": payload.name, "host": payload.host, "database": payload.database})
+    logger.info(
+        "connection_create_requested",
+        extra={"name": payload.name, "host": payload.host, "database": payload.database},
+    )
     try:
         encrypted = encrypt_secret(payload.password)
     except EncryptionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     connection = Connection(
         name=payload.name,
         host=payload.host,
@@ -49,6 +53,7 @@ def update_connection(connection_id: int, payload: ConnectionUpdate, db: Session
     connection = db.get(Connection, connection_id)
     if not connection:
         raise HTTPException(status_code=404, detail="Connection not found")
+
     for field, value in payload.model_dump(exclude_unset=True).items():
         if field == "password":
             try:
@@ -57,6 +62,7 @@ def update_connection(connection_id: int, payload: ConnectionUpdate, db: Session
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
         else:
             setattr(connection, field, value)
+
     db.commit()
     db.refresh(connection)
     logger.info("connection_updated", extra={"connection_id": connection_id})
@@ -76,29 +82,33 @@ def delete_connection(connection_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/{connection_id}/test")
-def test_connection(connection_id: int, db: Session = Depends(get_db)):
+def test_connection_endpoint(connection_id: int, db: Session = Depends(get_db)):
     logger.info("connection_test_requested", extra={"connection_id": connection_id})
     connection = db.get(Connection, connection_id)
     if not connection:
         raise HTTPException(status_code=404, detail="Connection not found")
+
     try:
         password = decrypt_secret(connection.password_encrypted)
-    except EncryptionError as exc:
+    except (EncryptionError, UnicodeDecodeError, TypeError, ValueError) as exc:
         logger.warning("connection_decrypt_failed", extra={"connection_id": connection_id})
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     info = ConnectionInfo(
         host=connection.host,
         port=connection.port,
         database=connection.database,
         username=connection.username,
         password=password,
-        ssl_mode=connection.ssl_mode,
+        ssl_mode=connection.ssl_mode or "prefer",
     )
+
     try:
-        test_connection(info)
+        test_connection_service(info)
     except Exception as exc:
         logger.exception("connection_test_failed", extra={"connection_id": connection_id})
         raise HTTPException(status_code=400, detail=_classify_connection_error(exc)) from exc
+
     logger.info("connection_test_succeeded", extra={"connection_id": connection_id})
     return {"status": "ok"}
 
@@ -109,11 +119,13 @@ def scan_connection(connection_id: int, background_tasks: BackgroundTasks, db: S
     connection = db.get(Connection, connection_id)
     if not connection:
         raise HTTPException(status_code=404, detail="Connection not found")
+
     try:
         password = decrypt_secret(connection.password_encrypted)
-    except EncryptionError as exc:
+    except (EncryptionError, UnicodeDecodeError, TypeError, ValueError) as exc:
         logger.warning("connection_decrypt_failed", extra={"connection_id": connection_id})
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     scan = Scan(connection_id=connection.id, status="running")
     db.add(scan)
     db.commit()
@@ -125,8 +137,9 @@ def scan_connection(connection_id: int, background_tasks: BackgroundTasks, db: S
         database=connection.database,
         username=connection.username,
         password=password,
-        ssl_mode=connection.ssl_mode,
+        ssl_mode=connection.ssl_mode or "prefer",
     )
+
     logger.info(
         "scan_enqueued",
         extra={
@@ -138,6 +151,7 @@ def scan_connection(connection_id: int, background_tasks: BackgroundTasks, db: S
             "ssl_mode": connection.ssl_mode,
         },
     )
+
     background_tasks.add_task(_run_scan_background, info, scan.id)
     return scan
 

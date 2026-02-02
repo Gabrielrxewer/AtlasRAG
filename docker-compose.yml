@@ -23,6 +23,10 @@ services:
       CORS_ORIGINS: http://localhost:5173,http://localhost:4173
       CORS_ALLOW_CREDENTIALS: "false"
       PYTHONUNBUFFERED: "1"
+      PYTHONUTF8: "1"
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
+      PGCLIENTENCODING: ${PGCLIENTENCODING:-UTF8}
     depends_on:
       - app-db
     ports:
