@@ -136,9 +136,14 @@ class ApiRouteAnnotationUpdate(BaseModel):
     fields: list[ApiRouteFieldIn] | None = None
 
 
+class RagScope(BaseModel):
+    connection_ids: list[int] | None = None
+    api_route_ids: list[int] | None = None
+
+
 class RagAskIn(BaseModel):
     question: str
-    scope: dict[str, Any] | None = None
+    scope: RagScope | None = None
 
 
 class RagAskOut(BaseModel):

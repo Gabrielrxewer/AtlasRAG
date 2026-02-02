@@ -24,16 +24,23 @@ def _openai_headers() -> dict[str, str]:
 
 def build_table_document(table: DbTable) -> dict[str, Any]:
     annotations = table.annotations or {}
+    sample_rows = table.samples[0].rows if table.samples else None
+    connection_id = table.schema.scan.connection_id if table.schema and table.schema.scan else None
+    scan_id = table.schema.scan_id if table.schema else None
     suggested_selects = build_suggested_selects(
         table.schema.name,
         table.name,
-        [column.name for column in table.columns],
+        [{"name": column.name, "tags": (column.annotations or {}).get("tags")} for column in table.columns],
+        table_annotations=annotations,
+        sample_rows=sample_rows,
     )
     content = {
         "type": "table",
         "id": table.id,
         "schema": table.schema.name,
         "name": table.name,
+        "connection_id": connection_id,
+        "scan_id": scan_id,
         "description": table.description or "",
         "annotations": annotations,
         "suggested_selects": suggested_selects,
@@ -43,9 +50,17 @@ def build_table_document(table: DbTable) -> dict[str, Any]:
 
 def build_column_document(column: DbColumn) -> dict[str, Any]:
     annotations = column.annotations or {}
+    connection_id = (
+        column.table.schema.scan.connection_id
+        if column.table and column.table.schema and column.table.schema.scan
+        else None
+    )
+    scan_id = column.table.schema.scan_id if column.table and column.table.schema else None
     content = {
         "type": "column",
         "id": column.id,
+        "connection_id": connection_id,
+        "scan_id": scan_id,
         "table": f"{column.table.schema.name}.{column.table.name}",
         "name": column.name,
         "data_type": column.data_type,
@@ -158,22 +173,39 @@ def reindex_embeddings(db: Session, scan_id: int | None, include_api_routes: boo
     return len(to_index)
 
 
-def search_embeddings(db: Session, question: str, top_k: int) -> list[Embedding]:
+def search_embeddings(db: Session, question: str, top_k: int, scope: dict[str, Any] | None = None) -> list[Embedding]:
     vector = embed_texts([question])[0]
     distance = Embedding.embedding.cosine_distance(vector)
+    limit = top_k
+    if scope and (scope.get("connection_ids") or scope.get("api_route_ids")):
+        limit = top_k * 5
     results = (
         db.query(Embedding, distance.label("distance"))
         .order_by(distance)
-        .limit(top_k)
+        .limit(limit)
         .all()
     )
     # cosine_distance: lower is more similar. Keep rows with distance <= threshold.
     filtered = [item for item, dist in results if dist is not None and dist <= settings.rag_min_score]
-    return filtered
+    if scope:
+        connection_ids = set(scope.get("connection_ids") or [])
+        api_route_ids = set(scope.get("api_route_ids") or [])
+        if connection_ids or api_route_ids:
+            scoped: list[Embedding] = []
+            for item in filtered:
+                if item.item_type in {"table", "column"} and connection_ids:
+                    connection_id = (item.meta or {}).get("connection_id")
+                    if connection_id in connection_ids:
+                        scoped.append(item)
+                elif item.item_type == "api_route" and api_route_ids:
+                    if item.item_id in api_route_ids:
+                        scoped.append(item)
+            filtered = scoped
+    return filtered[:top_k]
 
 
-def ask_rag(db: Session, question: str) -> dict[str, Any]:
-    matches = search_embeddings(db, question.strip(), settings.rag_top_k)
+def ask_rag(db: Session, question: str, scope: dict[str, Any] | None = None) -> dict[str, Any]:
+    matches = search_embeddings(db, question.strip(), settings.rag_top_k, scope=scope)
     if not matches:
         return {"answer": "Contexto insuficiente para responder com segurança.", "citations": []}
     context = [match.meta for match in matches]
