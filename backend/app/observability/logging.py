@@ -2,10 +2,21 @@ import logging
 import os
 from logging.config import dictConfig
 
+_CONFIGURED = False
+
 
 def setup_logging() -> None:
+    global _CONFIGURED
+    if _CONFIGURED:
+        return
+    _CONFIGURED = True
+
     level = os.getenv("LOG_LEVEL", "INFO").upper()
     log_format = "%(asctime)s %(levelname)s %(name)s %(message)s %(request_id)s"
+
+    root_logger = logging.getLogger()
+    for handler in list(root_logger.handlers):
+        root_logger.removeHandler(handler)
 
     dictConfig(
         {
@@ -24,6 +35,7 @@ def setup_logging() -> None:
                     "formatter": "json",
                     "filters": ["request_id"],
                     "level": level,
+                    "stream": "ext://sys.stdout",
                 },
             },
             "root": {"handlers": ["console"], "level": level},
@@ -31,9 +43,13 @@ def setup_logging() -> None:
                 "uvicorn": {"level": level, "propagate": True},
                 "uvicorn.error": {"level": level, "propagate": True},
                 "uvicorn.access": {"level": level, "propagate": True},
+                "alembic": {"level": level, "propagate": True},
+                "atlasrag": {"level": level, "propagate": True},
             },
         }
     )
+    logging.captureWarnings(True)
+    logging.getLogger("atlasrag").info("logging_configured", extra={"log_level": level})
 
 
 def get_logger(name: str) -> logging.Logger:
