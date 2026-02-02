@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     rate_limit_per_minute: int = 30
     cors_origins: str = "http://localhost:5173"
     cors_allow_credentials: bool = False
-    log_level: str = "INFO"
+    log_level: str = "DEBUG"
 
 
 settings = Settings()

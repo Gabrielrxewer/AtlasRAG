@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -7,10 +9,12 @@ from app.schemas import TableSchemaOut
 from app.services.selects import build_suggested_selects
 
 router = APIRouter(prefix="/scans", tags=["scans"])
+logger = logging.getLogger("atlasrag.scans")
 
 
 @router.get("/{scan_id}/schema", response_model=list[TableSchemaOut])
 def get_scan_schema(scan_id: int, db: Session = Depends(get_db)):
+    logger.info("scan_schema_requested", extra={"scan_id": scan_id})
     scan = db.get(Scan, scan_id)
     if not scan:
         raise HTTPException(status_code=404, detail="Scan not found")
@@ -21,6 +25,7 @@ def get_scan_schema(scan_id: int, db: Session = Depends(get_db)):
         .order_by(DbTable.id)
         .all()
     )
+    logger.info("scan_schema_tables_loaded", extra={"scan_id": scan_id, "table_count": len(tables)})
     output = []
     for table in tables:
         output.append(
@@ -51,4 +56,5 @@ def get_scan_schema(scan_id: int, db: Session = Depends(get_db)):
                 ),
             )
         )
+    logger.info("scan_schema_response_ready", extra={"scan_id": scan_id, "table_count": len(output)})
     return output

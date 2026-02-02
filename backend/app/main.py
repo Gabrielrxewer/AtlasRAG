@@ -113,6 +113,16 @@ async def request_context(request: Request, call_next):
     request.state.request_id = request_id
     token = request_id_var.set(request_id)
     start = time.perf_counter()
+    logger.info(
+        "request_started",
+        extra={
+            "request_id": request_id,
+            "method": request.method,
+            "path": request.url.path,
+            "query": request.url.query,
+            "client_ip": request.client.host if request.client else "unknown",
+        },
+    )
 
     if request.url.path.endswith("/rag/ask"):
         forwarded_for = request.headers.get("X-Forwarded-For", "")

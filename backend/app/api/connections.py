@@ -1,4 +1,5 @@
 import logging
+import time
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -15,6 +16,7 @@ logger = logging.getLogger("atlasrag.connections")
 
 @router.post("", response_model=ConnectionOut)
 def create_connection(payload: ConnectionCreate, db: Session = Depends(get_db)):
+    logger.info("connection_create_requested", extra={"name": payload.name, "host": payload.host, "database": payload.database})
     try:
         encrypted = encrypt_secret(payload.password)
     except EncryptionError as exc:
@@ -31,16 +33,19 @@ def create_connection(payload: ConnectionCreate, db: Session = Depends(get_db)):
     db.add(connection)
     db.commit()
     db.refresh(connection)
+    logger.info("connection_created", extra={"connection_id": connection.id})
     return connection
 
 
 @router.get("", response_model=list[ConnectionOut])
 def list_connections(db: Session = Depends(get_db)):
+    logger.info("connection_list_requested")
     return db.query(Connection).order_by(Connection.id).all()
 
 
 @router.put("/{connection_id}", response_model=ConnectionOut)
 def update_connection(connection_id: int, payload: ConnectionUpdate, db: Session = Depends(get_db)):
+    logger.info("connection_update_requested", extra={"connection_id": connection_id})
     connection = db.get(Connection, connection_id)
     if not connection:
         raise HTTPException(status_code=404, detail="Connection not found")
@@ -54,21 +59,25 @@ def update_connection(connection_id: int, payload: ConnectionUpdate, db: Session
             setattr(connection, field, value)
     db.commit()
     db.refresh(connection)
+    logger.info("connection_updated", extra={"connection_id": connection_id})
     return connection
 
 
 @router.delete("/{connection_id}")
 def delete_connection(connection_id: int, db: Session = Depends(get_db)):
+    logger.info("connection_delete_requested", extra={"connection_id": connection_id})
     connection = db.get(Connection, connection_id)
     if not connection:
         raise HTTPException(status_code=404, detail="Connection not found")
     db.delete(connection)
     db.commit()
+    logger.info("connection_deleted", extra={"connection_id": connection_id})
     return {"status": "deleted"}
 
 
 @router.post("/{connection_id}/test")
 def test_connection(connection_id: int, db: Session = Depends(get_db)):
+    logger.info("connection_test_requested", extra={"connection_id": connection_id})
     connection = db.get(Connection, connection_id)
     if not connection:
         raise HTTPException(status_code=404, detail="Connection not found")
@@ -90,11 +99,13 @@ def test_connection(connection_id: int, db: Session = Depends(get_db)):
     except Exception as exc:
         logger.exception("connection_test_failed", extra={"connection_id": connection_id})
         raise HTTPException(status_code=400, detail=_classify_connection_error(exc)) from exc
+    logger.info("connection_test_succeeded", extra={"connection_id": connection_id})
     return {"status": "ok"}
 
 
 @router.post("/{connection_id}/scan", response_model=ScanOut)
 def scan_connection(connection_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    logger.info("scan_request_received", extra={"connection_id": connection_id})
     connection = db.get(Connection, connection_id)
     if not connection:
         raise HTTPException(status_code=404, detail="Connection not found")
@@ -116,19 +127,33 @@ def scan_connection(connection_id: int, background_tasks: BackgroundTasks, db: S
         password=password,
         ssl_mode=connection.ssl_mode,
     )
-    logger.info("scan_enqueued", extra={"connection_id": connection_id, "scan_id": scan.id})
+    logger.info(
+        "scan_enqueued",
+        extra={
+            "connection_id": connection_id,
+            "scan_id": scan.id,
+            "host": connection.host,
+            "port": connection.port,
+            "database": connection.database,
+            "ssl_mode": connection.ssl_mode,
+        },
+    )
     background_tasks.add_task(_run_scan_background, info, scan.id)
     return scan
 
 
 def _run_scan_background(info: ConnectionInfo, scan_id: int) -> None:
     session = SessionLocal()
+    start = time.perf_counter()
+    logger.info("scan_background_started", extra={"scan_id": scan_id})
     try:
         run_scan(session, info, scan_id=scan_id)
     except Exception:
         logger.exception("scan_background_failed", extra={"scan_id": scan_id})
         raise
     finally:
+        duration_ms = (time.perf_counter() - start) * 1000
+        logger.info("scan_background_finished", extra={"scan_id": scan_id, "duration_ms": round(duration_ms, 2)})
         session.close()
 
 
@@ -143,4 +168,5 @@ def _classify_connection_error(exc: Exception) -> str:
 
 @router.get("/{connection_id}/scans", response_model=list[ScanOut])
 def list_scans(connection_id: int, db: Session = Depends(get_db)):
+    logger.info("scan_list_requested", extra={"connection_id": connection_id})
     return db.query(Scan).filter(Scan.connection_id == connection_id).order_by(Scan.id.desc()).all()
