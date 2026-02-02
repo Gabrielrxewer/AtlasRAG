@@ -121,6 +121,24 @@ def _truncate_log_value(value: str, limit: int = 120) -> str:
     return f"{value[:limit]}…({len(value)} chars)"
 
 
+def _query_for_log(query: str | Any) -> str:
+    if isinstance(query, str):
+        return _truncate_log_value(query, limit=300)
+    return _truncate_log_value(str(query), limit=300)
+
+
+def _params_for_log(params: dict[str, Any] | None) -> dict[str, Any]:
+    if not params:
+        return {}
+    sanitized: dict[str, Any] = {}
+    for key, value in params.items():
+        if isinstance(value, str):
+            sanitized[key] = _truncate_log_value(value, limit=120)
+        else:
+            sanitized[key] = value
+    return sanitized
+
+
 def _ensure_text_clause(query: str | Any):
     if isinstance(query, str):
         return text(query)
@@ -136,8 +154,29 @@ def _fetchall_with_encoding_fallback(
     context: str,
 ) -> list[Any]:
     query_clause = _ensure_text_clause(query)
+    log_params = _params_for_log(params)
+    logger.info(
+        "scan_fetchall_start",
+        extra={
+            "scan_id": scan_id,
+            "context": context,
+            "query": _query_for_log(query),
+            "params": log_params,
+        },
+    )
     try:
-        return conn.execute(query_clause, params or {}).fetchall()
+        rows = conn.execute(query_clause, params or {}).fetchall()
+        logger.info(
+            "scan_fetchall_success",
+            extra={
+                "scan_id": scan_id,
+                "context": context,
+                "row_count": len(rows),
+                "query": _query_for_log(query),
+                "params": log_params,
+            },
+        )
+        return rows
     except UnicodeDecodeError as exc:
         logger.warning(
             "scan_decode_error",
@@ -145,6 +184,8 @@ def _fetchall_with_encoding_fallback(
                 "scan_id": scan_id,
                 "context": context,
                 "error": str(exc),
+                "query": _query_for_log(query),
+                "params": log_params,
             },
         )
         for encoding in ("LATIN1", "CP1252"):
@@ -166,6 +207,8 @@ def _fetchall_with_encoding_fallback(
                         "scan_id": scan_id,
                         "context": context,
                         "encoding": encoding,
+                        "query": _query_for_log(query),
+                        "params": log_params,
                     },
                 )
                 continue
@@ -175,6 +218,9 @@ def _fetchall_with_encoding_fallback(
                     "scan_id": scan_id,
                     "context": context,
                     "encoding": encoding,
+                    "row_count": len(rows),
+                    "query": _query_for_log(query),
+                    "params": log_params,
                 },
             )
             return rows
@@ -190,9 +236,32 @@ def _fetch_rows_with_encoding_fallback(
     context: str,
 ) -> tuple[list[str], list[Any]]:
     query_clause = _ensure_text_clause(query)
+    log_params = _params_for_log(params)
+    logger.info(
+        "scan_fetchrows_start",
+        extra={
+            "scan_id": scan_id,
+            "context": context,
+            "query": _query_for_log(query),
+            "params": log_params,
+        },
+    )
     try:
         result = conn.execute(query_clause, params or {})
-        return list(result.keys()), result.fetchall()
+        rows = result.fetchall()
+        columns = list(result.keys())
+        logger.info(
+            "scan_fetchrows_success",
+            extra={
+                "scan_id": scan_id,
+                "context": context,
+                "row_count": len(rows),
+                "column_count": len(columns),
+                "query": _query_for_log(query),
+                "params": log_params,
+            },
+        )
+        return columns, rows
     except UnicodeDecodeError as exc:
         logger.warning(
             "scan_decode_error",
@@ -200,6 +269,8 @@ def _fetch_rows_with_encoding_fallback(
                 "scan_id": scan_id,
                 "context": context,
                 "error": str(exc),
+                "query": _query_for_log(query),
+                "params": log_params,
             },
         )
         for encoding in ("LATIN1", "CP1252"):
@@ -222,6 +293,8 @@ def _fetch_rows_with_encoding_fallback(
                         "scan_id": scan_id,
                         "context": context,
                         "encoding": encoding,
+                        "query": _query_for_log(query),
+                        "params": log_params,
                     },
                 )
                 continue
@@ -231,6 +304,9 @@ def _fetch_rows_with_encoding_fallback(
                     "scan_id": scan_id,
                     "context": context,
                     "encoding": encoding,
+                    "row_count": len(rows),
+                    "query": _query_for_log(query),
+                    "params": log_params,
                 },
             )
             return list(result.keys()), rows
@@ -346,10 +422,18 @@ def run_scan(db: Session, connection_info: ConnectionInfo, scan_id: int, sample_
         scan.error_message = None
         db.commit()
         existing_schemas = db.query(DbSchema).filter(DbSchema.scan_id == scan_id).all()
+        logger.info(
+            "scan_schema_cleanup_start",
+            extra={"scan_id": scan_id, "existing_schema_count": len(existing_schemas)},
+        )
         for schema in existing_schemas:
             db.delete(schema)
         if existing_schemas:
             db.commit()
+            logger.info(
+                "scan_schema_cleanup_complete",
+                extra={"scan_id": scan_id, "deleted_schema_count": len(existing_schemas)},
+            )
 
     client_engine = _build_client_engine(connection_info)
     logger.info(
@@ -380,6 +464,10 @@ def run_scan(db: Session, connection_info: ConnectionInfo, scan_id: int, sample_
                     scan_id=scan_id,
                     object_type="schema",
                     field_name="name",
+                )
+                logger.info(
+                    "scan_schema_processing",
+                    extra={"scan_id": scan_id, "schema_name": schema_name},
                 )
                 schema = DbSchema(scan_id=scan_id, name=schema_name)
                 db.add(schema)
@@ -446,6 +534,15 @@ def run_scan(db: Session, connection_info: ConnectionInfo, scan_id: int, sample_
                         schema_name=table_schema,
                         table_name=table_name,
                     )
+                    logger.info(
+                        "scan_table_processing",
+                        extra={
+                            "scan_id": scan_id,
+                            "schema_name": table_schema,
+                            "table_name": table_name,
+                            "table_type": table_type,
+                        },
+                    )
                     table = DbTable(schema_id=schema.id, name=table_name, table_type=table_type)
                     db.add(table)
                     db.flush()
@@ -508,6 +605,15 @@ def run_scan(db: Session, connection_info: ConnectionInfo, scan_id: int, sample_
                                 default=column_default,
                             )
                         )
+                    logger.info(
+                        "scan_columns_persisted",
+                        extra={
+                            "scan_id": scan_id,
+                            "schema_name": table_schema,
+                            "table_name": table_name,
+                            "column_count": len(columns),
+                        },
+                    )
 
                     constraints = _fetchall_with_encoding_fallback(
                         conn,
@@ -558,6 +664,15 @@ def run_scan(db: Session, connection_info: ConnectionInfo, scan_id: int, sample_
                                 definition=definition,
                             )
                         )
+                    logger.info(
+                        "scan_constraints_persisted",
+                        extra={
+                            "scan_id": scan_id,
+                            "schema_name": table_schema,
+                            "table_name": table_name,
+                            "constraint_count": len(constraints),
+                        },
+                    )
 
                     indexes = _fetchall_with_encoding_fallback(
                         conn,
@@ -593,6 +708,15 @@ def run_scan(db: Session, connection_info: ConnectionInfo, scan_id: int, sample_
                             table_name=table_name,
                         )
                         db.add(DbIndex(table_id=table.id, name=index_name, definition=definition))
+                    logger.info(
+                        "scan_indexes_persisted",
+                        extra={
+                            "scan_id": scan_id,
+                            "schema_name": table_schema,
+                            "table_name": table_name,
+                            "index_count": len(indexes),
+                        },
+                    )
 
                     sample_rows = _fetch_samples(conn, table_schema, table_name, sample_limit, scan_id=scan_id)
                     if sample_rows:
@@ -644,6 +768,16 @@ def _fetch_samples(
         )
         for row in pk_rows
     ]
+    logger.info(
+        "scan_primary_keys_loaded",
+        extra={
+            "scan_id": scan_id,
+            "schema_name": schema_name,
+            "table_name": table_name,
+            "primary_key_count": len(pk_columns),
+            "primary_keys": pk_columns,
+        },
+    )
     query_text = build_sample_query(schema_name, table_name, pk_columns)
     if not query_text:
         logger.warning(
@@ -651,6 +785,16 @@ def _fetch_samples(
             extra={"schema_name": schema_name, "table_name": table_name},
         )
         return []
+    logger.info(
+        "scan_sample_query_built",
+        extra={
+            "scan_id": scan_id,
+            "schema_name": schema_name,
+            "table_name": table_name,
+            "query": _query_for_log(query_text),
+            "sample_limit": sample_limit,
+        },
+    )
     query = text(query_text)
     try:
         columns, fetched_rows = _fetch_rows_with_encoding_fallback(
