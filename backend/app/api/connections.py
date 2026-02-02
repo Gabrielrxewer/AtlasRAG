@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -8,6 +10,7 @@ from app.security import encrypt_secret, decrypt_secret, EncryptionError
 from app.services.scan import ConnectionInfo, run_scan, test_connection
 
 router = APIRouter(prefix="/connections", tags=["connections"])
+logger = logging.getLogger("atlasrag.connections")
 
 
 @router.post("", response_model=ConnectionOut)
@@ -72,6 +75,7 @@ def test_connection(connection_id: int, db: Session = Depends(get_db)):
     try:
         password = decrypt_secret(connection.password_encrypted)
     except EncryptionError as exc:
+        logger.warning("connection_decrypt_failed", extra={"connection_id": connection_id})
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     info = ConnectionInfo(
         host=connection.host,
@@ -84,6 +88,7 @@ def test_connection(connection_id: int, db: Session = Depends(get_db)):
     try:
         test_connection(info)
     except Exception as exc:
+        logger.exception("connection_test_failed", extra={"connection_id": connection_id})
         raise HTTPException(status_code=400, detail=_classify_connection_error(exc)) from exc
     return {"status": "ok"}
 
@@ -96,6 +101,7 @@ def scan_connection(connection_id: int, background_tasks: BackgroundTasks, db: S
     try:
         password = decrypt_secret(connection.password_encrypted)
     except EncryptionError as exc:
+        logger.warning("connection_decrypt_failed", extra={"connection_id": connection_id})
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     scan = Scan(connection_id=connection.id, status="running")
     db.add(scan)
@@ -110,6 +116,7 @@ def scan_connection(connection_id: int, background_tasks: BackgroundTasks, db: S
         password=password,
         ssl_mode=connection.ssl_mode,
     )
+    logger.info("scan_enqueued", extra={"connection_id": connection_id, "scan_id": scan.id})
     background_tasks.add_task(_run_scan_background, info, scan.id)
     return scan
 
@@ -118,6 +125,9 @@ def _run_scan_background(info: ConnectionInfo, scan_id: int) -> None:
     session = SessionLocal()
     try:
         run_scan(session, info, scan_id=scan_id)
+    except Exception:
+        logger.exception("scan_background_failed", extra={"scan_id": scan_id})
+        raise
     finally:
         session.close()
 

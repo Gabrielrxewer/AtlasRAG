@@ -10,6 +10,8 @@ from sqlalchemy.engine import create_engine
 from sqlalchemy.engine import URL
 from sqlalchemy.orm import Session
 
+import logging
+
 from app.models import DbSchema, DbTable, DbColumn, DbConstraint, DbIndex, DbView, Sample, Scan
 
 
@@ -80,6 +82,7 @@ WHERE i.indisprimary
 """
 
 IDENTIFIER_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+logger = logging.getLogger("atlasrag.scan")
 
 
 def is_safe_identifier(value: str) -> bool:
@@ -125,6 +128,7 @@ def run_scan(db: Session, connection_info: ConnectionInfo, scan_id: int, sample_
             scan.status = "running"
         if scan.started_at is None:
             scan.started_at = datetime.now(timezone.utc)
+        scan.error_message = None
         db.commit()
         existing_schemas = db.query(DbSchema).filter(DbSchema.scan_id == scan_id).all()
         for schema in existing_schemas:
@@ -133,19 +137,38 @@ def run_scan(db: Session, connection_info: ConnectionInfo, scan_id: int, sample_
             db.commit()
 
     client_engine = _build_client_engine(connection_info)
+    logger.info(
+        "scan_started",
+        extra={
+            "scan_id": scan_id,
+            "host": connection_info.host,
+            "port": connection_info.port,
+            "database": connection_info.database,
+            "ssl_mode": connection_info.ssl_mode,
+        },
+    )
     try:
         with client_engine.connect() as conn:
             schemas = conn.execute(text(SCHEMA_QUERY)).fetchall()
+            logger.info("scan_schemas_loaded", extra={"scan_id": scan_id, "schema_count": len(schemas)})
             for (schema_name,) in schemas:
                 schema = DbSchema(scan_id=scan_id, name=schema_name)
                 db.add(schema)
                 db.flush()
 
                 views = conn.execute(text(VIEW_QUERY), {"schema_name": schema_name}).fetchall()
+                logger.info(
+                    "scan_views_loaded",
+                    extra={"scan_id": scan_id, "schema_name": schema_name, "view_count": len(views)},
+                )
                 for view_name, definition in views:
                     db.add(DbView(schema_id=schema.id, name=view_name, definition=definition))
 
                 tables = conn.execute(text(TABLE_QUERY), {"schema_name": schema_name}).fetchall()
+                logger.info(
+                    "scan_tables_loaded",
+                    extra={"scan_id": scan_id, "schema_name": schema_name, "table_count": len(tables)},
+                )
                 for table_schema, table_name, table_type in tables:
                     table = DbTable(schema_id=schema.id, name=table_name, table_type=table_type)
                     db.add(table)
@@ -154,6 +177,15 @@ def run_scan(db: Session, connection_info: ConnectionInfo, scan_id: int, sample_
                     columns = conn.execute(
                         text(COLUMN_QUERY), {"schema_name": table_schema, "table_name": table_name}
                     ).fetchall()
+                    logger.info(
+                        "scan_columns_loaded",
+                        extra={
+                            "scan_id": scan_id,
+                            "schema_name": table_schema,
+                            "table_name": table_name,
+                            "column_count": len(columns),
+                        },
+                    )
                     for column_name, data_type, is_nullable, column_default in columns:
                         db.add(
                             DbColumn(
@@ -168,6 +200,15 @@ def run_scan(db: Session, connection_info: ConnectionInfo, scan_id: int, sample_
                     constraints = conn.execute(
                         text(CONSTRAINT_QUERY), {"schema_name": table_schema, "table_name": table_name}
                     ).fetchall()
+                    logger.info(
+                        "scan_constraints_loaded",
+                        extra={
+                            "scan_id": scan_id,
+                            "schema_name": table_schema,
+                            "table_name": table_name,
+                            "constraint_count": len(constraints),
+                        },
+                    )
                     for name, constraint_type, definition in constraints:
                         db.add(
                             DbConstraint(
@@ -181,21 +222,43 @@ def run_scan(db: Session, connection_info: ConnectionInfo, scan_id: int, sample_
                     indexes = conn.execute(
                         text(INDEX_QUERY), {"schema_name": table_schema, "table_name": table_name}
                     ).fetchall()
+                    logger.info(
+                        "scan_indexes_loaded",
+                        extra={
+                            "scan_id": scan_id,
+                            "schema_name": table_schema,
+                            "table_name": table_name,
+                            "index_count": len(indexes),
+                        },
+                    )
                     for index_name, definition in indexes:
                         db.add(DbIndex(table_id=table.id, name=index_name, definition=definition))
 
                     sample_rows = _fetch_samples(conn, table_schema, table_name, sample_limit)
                     if sample_rows:
                         db.add(Sample(table_id=table.id, rows=sample_rows))
+                    logger.info(
+                        "scan_samples_loaded",
+                        extra={
+                            "scan_id": scan_id,
+                            "schema_name": table_schema,
+                            "table_name": table_name,
+                            "sample_count": len(sample_rows),
+                        },
+                    )
 
         if scan:
             scan.status = "completed"
             scan.finished_at = datetime.now(timezone.utc)
+            scan.error_message = None
         db.commit()
-    except Exception:
+        logger.info("scan_completed", extra={"scan_id": scan_id})
+    except Exception as exc:
+        logger.exception("scan_failed", extra={"scan_id": scan_id})
         if scan:
             scan.status = "failed"
             scan.finished_at = datetime.now(timezone.utc)
+            scan.error_message = f"{type(exc).__name__}: {exc}"[:1000]
             db.commit()
         raise
 
@@ -207,8 +270,19 @@ def _fetch_samples(conn, schema_name: str, table_name: str, sample_limit: int) -
     ]
     query_text = build_sample_query(schema_name, table_name, pk_columns)
     if not query_text:
+        logger.warning(
+            "scan_sample_query_invalid",
+            extra={"schema_name": schema_name, "table_name": table_name},
+        )
         return []
     query = text(query_text)
-    result = conn.execute(query, {"limit": sample_limit})
-    columns = result.keys()
-    return [dict(zip(columns, row)) for row in result.fetchall()]
+    try:
+        result = conn.execute(query, {"limit": sample_limit})
+        columns = result.keys()
+        return [dict(zip(columns, row)) for row in result.fetchall()]
+    except Exception:
+        logger.exception(
+            "scan_sample_query_failed",
+            extra={"schema_name": schema_name, "table_name": table_name},
+        )
+        return []

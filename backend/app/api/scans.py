@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.models import Scan, DbTable, DbSchema
 from app.schemas import TableSchemaOut
+from app.services.selects import build_suggested_selects
 
 router = APIRouter(prefix="/scans", tags=["scans"])
 
@@ -43,6 +44,11 @@ def get_scan_schema(scan_id: int, db: Session = Depends(get_db)):
                     }
                     for column in table.columns
                 ],
+                suggested_selects=build_suggested_selects(
+                    table.schema.name,
+                    table.name,
+                    [column.name for column in table.columns],
+                ),
             )
         )
     return output

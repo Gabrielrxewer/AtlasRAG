@@ -44,6 +44,7 @@ class ScanOut(BaseModel):
     status: str
     started_at: datetime
     finished_at: datetime | None
+    error_message: str | None = None
 
     class Config:
         from_attributes = True
@@ -77,6 +78,7 @@ class TableSchemaOut(BaseModel):
     description: str | None
     annotations: dict | None
     columns: list[ColumnOut]
+    suggested_selects: list[str] = Field(default_factory=list)
 
 
 class SampleOut(BaseModel):
