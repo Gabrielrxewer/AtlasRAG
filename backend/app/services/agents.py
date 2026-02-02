@@ -89,6 +89,7 @@ def _build_system_prompt(
         "- selects: lista de objetos quando action='select', cada item com:",
         "  - query: SQL SELECT (ou WITH ... SELECT), sem instruções de escrita.",
         "  - connection_id: opcional se houver mais de uma conexão disponível.",
+        "Não sugira SQL em texto livre. Use action='select' para consultas.",
     ]
     if agent.rag_prompt:
         lines.append(f"Prompt RAG: {agent.rag_prompt}")
@@ -286,16 +287,19 @@ def build_agent_reply(
 
         reply_content = data["choices"][0]["message"]["content"]
         action = _extract_json_payload(reply_content)
+        fallback_selects = _extract_selects_from_text(reply_content)
         if not action:
-            fallback_selects = _extract_selects_from_text(reply_content)
             if fallback_selects:
                 action = {"action": "select", "selects": [{"query": q} for q in fallback_selects]}
             else:
                 return reply_content, citations, executed_selects, tool_payload
 
         if action.get("action") == "final":
-            answer = action.get("content") if action.get("content") else reply_content
-            return answer, citations, executed_selects, tool_payload
+            if fallback_selects:
+                action = {"action": "select", "selects": [{"query": q} for q in fallback_selects]}
+            else:
+                answer = action.get("content") if action.get("content") else reply_content
+                return answer, citations, executed_selects, tool_payload
 
         if action.get("action") != "select":
             return reply_content, citations, executed_selects, tool_payload
