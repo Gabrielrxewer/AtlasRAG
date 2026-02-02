@@ -316,3 +316,9 @@ def test_fallback_top_query(monkeypatch):
     assert response.decision == "run_selects"
     assert "ORDER BY value DESC" in response.queries[0].sql
     assert response.queries[0].sql.endswith("LIMIT 1")
+
+
+def test_json_dumps_safe_handles_decimal():
+    payload = {"value": sql_orchestrator.Decimal("49726.60")}
+    rendered = sql_orchestrator._json_dumps_safe(payload)
+    assert '"49726.60"' in rendered
