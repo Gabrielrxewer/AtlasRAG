@@ -1,3 +1,4 @@
+"""Entrypoint da API com inicialização de middlewares, rotas e observabilidade."""
 import time
 import uuid
 from pathlib import Path
@@ -10,13 +11,14 @@ from fastapi.responses import JSONResponse
 from alembic import command
 from alembic.config import Config
 
-from app.config import settings
-from app.observability.logging import setup_logging, get_logger
-from app.observability.request_id import set_request_id, new_request_id, get_request_id
-from app.middlewares.http_logging import HttpLoggingMiddleware
-from app.middlewares.exception_handlers import unhandled_exception_handler
-from app.api import connections, scans, tables, api_routes, rag, agents
+from app.core.config import settings
+from app.infrastructure.observability.logging import setup_logging, get_logger
+from app.infrastructure.observability.request_id import set_request_id, new_request_id, get_request_id
+from app.presentation.middlewares.http_logging import HttpLoggingMiddleware
+from app.presentation.middlewares.exception_handlers import unhandled_exception_handler
+from app.presentation.api import connections, scans, tables, api_routes, rag, agents
 
+# Configura logging estruturado antes de qualquer handler.
 setup_logging()
 
 app = FastAPI(title="AtlasRAG API", version="0.1.0")
@@ -27,6 +29,7 @@ logger = get_logger("atlasrag")
 
 
 def _run_migrations() -> None:
+    """Aplica migrações do Alembic no startup."""
     config_path = Path(__file__).resolve().parents[1] / "alembic.ini"
     alembic_cfg = Config(str(config_path))
     alembic_cfg.set_main_option("sqlalchemy.url", settings.database_url)
@@ -35,6 +38,7 @@ def _run_migrations() -> None:
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
+    # Retorna erros HTTP preservando o request id para troubleshooting.
     request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
     origin = request.headers.get("origin")
     headers = {"X-Request-ID": request_id}
@@ -51,6 +55,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
 
 class RateLimiter:
+    """Rate limiter simples em memória usando janela deslizante."""
     def __init__(self, max_keys: int, window_seconds: int):
         self.max_keys = max_keys
         self.window_seconds = window_seconds
@@ -58,7 +63,7 @@ class RateLimiter:
         self.lock = Lock()
 
     def allow(self, key: str, limit: int) -> bool:
-        # Sliding window rate limiter stored in-memory (per-process).
+        # Janela deslizante em memória (por processo).
         with self.lock:
             now = time.time()
             timestamps = self.cache.get(key, [])
@@ -82,6 +87,7 @@ rate_limiter = RateLimiter(max_keys=10_000, window_seconds=60)
 
 
 def _parse_cors_origins(raw: str) -> list[str]:
+    # Normaliza e valida origens permitidas de CORS por ambiente.
     origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
     if settings.environment == "development" and not origins:
         origins = ["http://localhost:5173", "http://localhost:4173"]
@@ -110,6 +116,7 @@ app.add_middleware(
 
 @app.middleware("http")
 async def request_context(request: Request, call_next):
+    # Injeta request id e aplica rate limiting em rotas sensíveis.
     request_id = request.headers.get("X-Request-ID", get_request_id() or new_request_id())
     request.state.request_id = request_id
     set_request_id(request_id)
@@ -131,6 +138,7 @@ async def request_context(request: Request, call_next):
     try:
         response = await call_next(request)
     except Exception:
+        # Loga exceções não tratadas com contexto de performance.
         duration_ms = (time.perf_counter() - start) * 1000
         client_ip = request.client.host if request.client else None
         logger.exception(
@@ -161,6 +169,7 @@ async def request_context(request: Request, call_next):
 
 
 def _extract_client_ip(x_forwarded_for: str, fallback: str | None) -> str:
+    # Prioriza IPs encaminhados por proxy quando disponíveis.
     if x_forwarded_for:
         for value in x_forwarded_for.split(","):
             candidate = value.strip()
@@ -170,6 +179,7 @@ def _extract_client_ip(x_forwarded_for: str, fallback: str | None) -> str:
 
 
 def _log_request(request: Request, request_id: str, client_ip: str | None, status_code: int, duration_ms: float) -> None:
+    # Centraliza log de requests com métricas básicas.
     logger.info(
         "request_completed",
         extra={
@@ -193,6 +203,7 @@ app.include_router(agents.router)
 
 @app.on_event("startup")
 def run_migrations_on_startup() -> None:
+    # Mantém schema em dia antes de aceitar tráfego.
     logger.info("Running database migrations")
     _run_migrations()
 

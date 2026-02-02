@@ -1,10 +1,12 @@
+"""Seed simples para dados de demonstração."""
 from sqlalchemy.orm import Session
 
-from app.db import SessionLocal
-from app.models import ApiRoute, ApiRouteField
+from app.infrastructure.db import SessionLocal
+from app.domain.models import ApiRoute, ApiRouteField
 
 
 def seed_demo(db: Session) -> None:
+    """Insere rota de exemplo caso não exista."""
     if db.query(ApiRoute).first():
         return
     route = ApiRoute(
@@ -34,6 +36,7 @@ def seed_demo(db: Session) -> None:
 
 
 if __name__ == "__main__":
+    # Executa seed quando chamado via CLI.
     session = SessionLocal()
     try:
         seed_demo(session)

@@ -1,10 +1,12 @@
+"""Testes de construção de engine para scans."""
 import pytest
 
 pytest.importorskip("sqlalchemy")
-from app.services.scan import ConnectionInfo, _build_client_engine
+from app.application.services.scan import ConnectionInfo, _build_client_engine
 
 
 def test_build_client_engine_allows_special_chars():
+    # Senhas com caracteres especiais devem ser preservadas.
     info = ConnectionInfo(
         host="localhost",
         port=5432,

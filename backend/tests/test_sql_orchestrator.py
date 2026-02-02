@@ -1,11 +1,13 @@
+"""Testes de validação e fallback do orquestrador SQL."""
 import json
 from dataclasses import dataclass
 
-from app.config import settings
-from app.services import sql_orchestrator
+from app.core.config import settings
+from app.application.services import sql_orchestrator
 
 
 def test_validate_sql_enforces_safety_and_limit():
+    # Valida regras de segurança e limite de rows.
     allowed_tables = {"public.assets", "assets"}
     ok, error, safe_sql = sql_orchestrator._validate_sql(
         "SELECT id FROM public.assets", allowed_tables, max_rows=5
@@ -41,10 +43,12 @@ def test_validate_sql_enforces_safety_and_limit():
 
 
 def test_orchestrate_sql_rag_smoke(monkeypatch):
+    # Smoke test do fluxo planner/responder com mocks.
     monkeypatch.setattr(settings, "openai_api_key", "test-key")
     monkeypatch.setattr(sql_orchestrator, "reconcile_scan_status", lambda *_args, **_kwargs: None)
 
     def fake_schema_context(_db, _connection_ids):
+        # Schema de teste com uma tabela assets.
         return (
             {
                 "connections": [
@@ -96,6 +100,7 @@ def test_orchestrate_sql_rag_smoke(monkeypatch):
     }
 
     def fake_call_llm(_model, messages, response_format=None):
+        # Retorna payloads JSON diferentes por tipo de prompt.
         if "Planner SQL-RAG" in messages[0]["content"]:
             return json.dumps(planner_payload, ensure_ascii=False)
         return json.dumps(responder_payload, ensure_ascii=False)
@@ -133,10 +138,12 @@ def test_orchestrate_sql_rag_smoke(monkeypatch):
 
 
 def test_orchestrate_sql_rag_planner_invalid_fallback(monkeypatch):
+    # Garante fallback quando planner retorna JSON inválido.
     monkeypatch.setattr(settings, "openai_api_key", "test-key")
     monkeypatch.setattr(sql_orchestrator, "reconcile_scan_status", lambda *_args, **_kwargs: None)
 
     def fake_schema_context(_db, _connection_ids):
+        # Mantém catálogo mínimo para fallback.
         return (
             {
                 "connections": [
@@ -167,6 +174,7 @@ def test_orchestrate_sql_rag_planner_invalid_fallback(monkeypatch):
     }
 
     def fake_call_llm(_model, messages, response_format=None):
+        # Devolve erro no planner e resposta válida no responder.
         if "Planner SQL-RAG" in messages[0]["content"]:
             return "not-json"
         return json.dumps(responder_payload, ensure_ascii=False)
@@ -197,11 +205,13 @@ def test_orchestrate_sql_rag_planner_invalid_fallback(monkeypatch):
 
 @dataclass
 class FakeConnection:
+    """Conexão fake para os testes."""
     id: int
     updated_at: None = None
 
 
 class FakeSession:
+    """Session fake para simular get de conexão."""
     def __init__(self, connection: FakeConnection):
         self._connection = connection
 
@@ -212,6 +222,7 @@ class FakeSession:
 
 
 class FakeEngine:
+    """Engine fake para simular execução."""
     def __init__(self, rows):
         self._rows = rows
 
@@ -220,6 +231,7 @@ class FakeEngine:
 
 
 class FakeConnectionContext:
+    """Context manager fake para conexão."""
     def __init__(self, rows):
         self._rows = rows
 
@@ -234,6 +246,7 @@ class FakeConnectionContext:
 
 
 class FakeResult:
+    """Resultado fake para retornos de select."""
     def __init__(self, rows):
         self._rows = rows
 
@@ -250,6 +263,7 @@ class FakeResult:
 
 
 def test_orchestrate_sql_rag_without_catalog(monkeypatch):
+    # Retorna mensagem amigável quando não há catálogo.
     monkeypatch.setattr(settings, "openai_api_key", "test-key")
     monkeypatch.setattr(sql_orchestrator, "reconcile_scan_status", lambda *_args, **_kwargs: None)
 
@@ -285,6 +299,7 @@ def test_orchestrate_sql_rag_without_catalog(monkeypatch):
 
 
 def test_validate_sql_allows_cte(monkeypatch):
+    # CTEs devem passar na validação.
     allowed_tables = {"public.assets", "assets"}
     sql = "WITH tmp AS (SELECT id FROM public.assets) SELECT id FROM tmp"
     ok, error, safe_sql = sql_orchestrator._validate_sql(sql, allowed_tables, max_rows=5)
@@ -293,6 +308,7 @@ def test_validate_sql_allows_cte(monkeypatch):
 
 
 def test_fallback_top_query(monkeypatch):
+    # Fallback deve sugerir ORDER BY valor DESC.
     schema_context = {
         "connections": [
             {
@@ -319,6 +335,7 @@ def test_fallback_top_query(monkeypatch):
 
 
 def test_json_dumps_safe_handles_decimal():
+    # Decimal deve ser serializado como string.
     payload = {"value": sql_orchestrator.Decimal("49726.60")}
     rendered = sql_orchestrator._json_dumps_safe(payload)
     assert '"49726.60"' in rendered

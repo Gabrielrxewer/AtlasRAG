@@ -1,10 +1,11 @@
+"""Configuração do Alembic para migrações."""
 from logging.config import fileConfig
 from sqlalchemy import engine_from_config, pool
 from alembic import context
 
-from app.config import settings
-from app.db import Base
-from app import models
+from app.core.config import settings
+from app.infrastructure.db import Base
+from app.domain import models
 
 config = context.config
 
@@ -17,6 +18,7 @@ target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
+    """Executa migrações em modo offline."""
     url = config.get_main_option("sqlalchemy.url")
     context.configure(
         url=url,
@@ -29,6 +31,7 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
+    """Executa migrações em modo online."""
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
