@@ -461,39 +461,64 @@ def run_scan(db: Session, connection_info: ConnectionInfo, scan_id: int, sample_
 
     last_exc: Exception | None = None
 
-    for idx, info in enumerate(attempts, start=1):
-        try:
-            _run_scan_once(db, info, ctx, sample_limit=sample_limit)
-            scan = db.get(Scan, scan_id)
-            if scan:
-                scan.status = "completed"
-                scan.finished_at = datetime.now(timezone.utc)
-                scan.error_message = None
-                db.commit()
-            logger.info("scan_completed", extra={"scan_id": scan_id})
-            return
-        except Exception as exc:
-            last_exc = exc
-            if not _is_encoding_related_error(exc) or idx == len(attempts):
-                _fail_with_context(db, ctx, exc)
-                raise
-
-            next_enc = attempts[idx].pgclientencoding if idx < len(attempts) else None
-            logger.warning(
-                "scan_retry_due_to_encoding",
-                extra={
-                    "scan_id": scan_id,
-                    "attempt": idx,
-                    "next_pgclientencoding": next_enc,
-                    "error": _truncate(_safe_str(exc), 1200),
-                    **ctx.as_log_extra(),
-                },
-                exc_info=True,
-            )
+    try:
+        for idx, info in enumerate(attempts, start=1):
             try:
-                db.rollback()
+                _run_scan_once(db, info, ctx, sample_limit=sample_limit)
+                scan = db.get(Scan, scan_id)
+                if scan:
+                    scan.status = "completed"
+                    scan.finished_at = datetime.now(timezone.utc)
+                    scan.error_message = None
+                    db.commit()
+                logger.info("scan_completed", extra={"scan_id": scan_id})
+                return
+            except Exception as exc:
+                last_exc = exc
+                if not _is_encoding_related_error(exc) or idx == len(attempts):
+                    _fail_with_context(db, ctx, exc)
+                    raise
+
+                next_enc = attempts[idx].pgclientencoding if idx < len(attempts) else None
+                logger.warning(
+                    "scan_retry_due_to_encoding",
+                    extra={
+                        "scan_id": scan_id,
+                        "attempt": idx,
+                        "next_pgclientencoding": next_enc,
+                        "error": _truncate(_safe_str(exc), 1200),
+                        **ctx.as_log_extra(),
+                    },
+                    exc_info=True,
+                )
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+    finally:
+        scan = db.get(Scan, scan_id)
+        if scan and scan.status == "running":
+            schema_count, table_count = _scan_catalog_counts(db, scan_id)
+            if table_count > 0:
+                scan.status = "completed"
+                scan.finished_at = scan.finished_at or datetime.now(timezone.utc)
+                scan.error_message = None
+                logger.warning(
+                    "scan_completed_on_finalize",
+                    extra={"scan_id": scan_id, "tables": table_count},
+                )
+            elif schema_count == 0 and table_count == 0:
+                scan.status = "failed"
+                scan.finished_at = scan.finished_at or datetime.now(timezone.utc)
+                scan.error_message = "Scan interrompido/sem catálogo gerado"
+                logger.warning("scan_failed_on_finalize", extra={"scan_id": scan_id})
+            try:
+                db.commit()
             except Exception:
-                pass
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
 
     if last_exc:
         raise last_exc
@@ -821,7 +846,20 @@ def _run_scan_once(db: Session, info: ConnectionInfo, ctx: ScanContext, sample_l
                     ctx.context = "samples"
                     _checkpoint(db, ctx)
 
-                    sample_rows = _fetch_samples(conn, ctx, table_schema, table_name, sample_limit)
+                    try:
+                        sample_rows = _fetch_samples(conn, ctx, table_schema, table_name, sample_limit)
+                    except Exception as exc:
+                        logger.warning(
+                            "scan_samples_failed",
+                            extra={
+                                "scan_id": ctx.scan_id,
+                                "schema": table_schema,
+                                "table": table_name,
+                                "error": _truncate(_safe_str(exc), 1200),
+                            },
+                            exc_info=True,
+                        )
+                        sample_rows = []
                     if sample_rows:
                         db.add(Sample(table_id=table.id, rows=sample_rows))
 
