@@ -221,7 +221,7 @@ def search_embeddings(db: Session, question: str, top_k: int, scope: dict[str, A
     distance = Embedding.embedding.cosine_distance(vector)
     limit = top_k
     if scope and (scope.get("connection_ids") or scope.get("api_route_ids")):
-        limit = top_k * 5
+        limit = top_k * 20
     results = (
         db.query(Embedding, distance.label("distance"))
         .order_by(distance)
@@ -236,7 +236,7 @@ def search_embeddings(db: Session, question: str, top_k: int, scope: dict[str, A
         latest_scan_ids = _latest_scan_ids(db, connection_ids)
         fallback_table_ids: set[int] = set()
         fallback_column_ids: set[int] = set()
-        for item in filtered:
+        for item, _ in results:
             if item.item_type == "table" and not (item.meta or {}).get("connection_id"):
                 fallback_table_ids.add(item.item_id)
             elif item.item_type == "column" and not (item.meta or {}).get("connection_id"):
@@ -244,8 +244,8 @@ def search_embeddings(db: Session, question: str, top_k: int, scope: dict[str, A
         fallback_table_meta = _resolve_table_meta(db, fallback_table_ids)
         fallback_column_meta = _resolve_column_meta(db, fallback_column_ids)
         if connection_ids or api_route_ids:
-            scoped: list[Embedding] = []
-            for item in filtered:
+            scoped_candidates: list[tuple[Embedding, float]] = []
+            for item, dist in results:
                 if item.item_type in {"table", "column"} and connection_ids:
                     meta = item.meta or {}
                     if item.item_type == "table":
@@ -255,10 +255,13 @@ def search_embeddings(db: Session, question: str, top_k: int, scope: dict[str, A
                     connection_id = meta.get("connection_id")
                     scan_id = meta.get("scan_id")
                     if connection_id in connection_ids and (not latest_scan_ids or scan_id in latest_scan_ids):
-                        scoped.append(item)
+                        scoped_candidates.append((item, dist))
                 elif item.item_type == "api_route" and api_route_ids:
                     if item.item_id in api_route_ids:
-                        scoped.append(item)
+                        scoped_candidates.append((item, dist))
+            scoped = [item for item, dist in scoped_candidates if dist is not None and dist <= settings.rag_min_score]
+            if not scoped and scoped_candidates:
+                scoped = [item for item, _ in scoped_candidates[:top_k]]
             filtered = scoped
     return filtered[:top_k]
 
