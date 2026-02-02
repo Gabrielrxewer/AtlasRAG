@@ -60,8 +60,8 @@ def configure_logging() -> None:
             "root": {"handlers": ["default"], "level": level},
             "loggers": {
                 "atlasrag": {"handlers": ["default"], "level": level, "propagate": False},
-                "uvicorn.access": {"level": "WARNING", "propagate": True},
-                "uvicorn.error": {"level": level, "propagate": True},
+                "uvicorn.access": {"handlers": ["default"], "level": "INFO", "propagate": False},
+                "uvicorn.error": {"handlers": ["default"], "level": level, "propagate": False},
             },
         }
     )
