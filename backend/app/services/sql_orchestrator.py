@@ -4,7 +4,8 @@ import json
 import logging
 import re
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from decimal import Decimal
 from dataclasses import dataclass
 from typing import Any, Literal
 from uuid import uuid4
@@ -655,7 +656,7 @@ def _planner_prompt(payload: dict[str, Any]) -> list[dict[str, str]]:
     )
     return [
         {"role": "system", "content": instructions},
-        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+        {"role": "user", "content": _json_dumps_safe(payload)},
     ]
 
 
@@ -691,7 +692,7 @@ def _responder_prompt(payload: dict[str, Any], agent_system_prompt: str) -> list
     )
     return [
         {"role": "system", "content": f"{agent_system_prompt}\n\n{instructions}"},
-        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+        {"role": "user", "content": _json_dumps_safe(payload)},
     ]
 
 
@@ -723,6 +724,18 @@ def _parse_json_response(raw: str) -> dict[str, Any]:
         return json.loads(cleaned)
     except json.JSONDecodeError as exc:
         raise ValueError("Resposta JSON inválida do LLM.") from exc
+
+
+def _json_default(value: Any) -> str:
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    return str(value)
+
+
+def _json_dumps_safe(payload: dict[str, Any]) -> str:
+    return json.dumps(payload, ensure_ascii=False, default=_json_default)
 
 
 def _planner_request_payload(
